@@ -7,7 +7,7 @@ import os
 from contextlib import asynccontextmanager
 
 from .database import database
-from .models import ScoreSubmission, EmailClaim, ScoreResponse, HighScoreCheck, ClaimResponse
+from .models import ScoreSubmission, ClaimData, ScoreResponse, HighScoreCheck, ClaimResponse
 
 # Configure logging
 logging.basicConfig(
@@ -57,6 +57,8 @@ async def root():
 async def submit_score(score: ScoreSubmission):
     """Submit a game score"""
     try:
+        logger.info(f"Attempting to submit score: {score}")
+        
         await database.submit_score(
             score.session_id, 
             score.final_bill, 
@@ -74,9 +76,14 @@ async def submit_score(score: ScoreSubmission):
         
     except Exception as e:
         logger.error(f"Error submitting score: {e}")
+        logger.error(f"Error type: {type(e)}")
+        logger.error(f"Error details: {str(e)}")
+        
         if "duplicate key" in str(e).lower():
-            raise HTTPException(status_code=400, detail="Session ID already exists")
-        raise HTTPException(status_code=500, detail="Failed to submit score")
+            raise HTTPException(status_code=400, detail=f"Session ID already exists: {score.session_id}")
+        
+        # For debugging, return more detailed error info
+        raise HTTPException(status_code=500, detail=f"Failed to submit score: {str(e)}")
 
 @app.get("/api/check-high-score/{session_id}", response_model=HighScoreCheck)
 async def check_high_score(session_id: str):
@@ -148,7 +155,7 @@ async def claim_page(session_id: str, request: Request):
                             <strong>Final Bill:</strong> {final_bill_formatted}<br>
                             <strong>Total Saved:</strong> {total_savings_formatted}
                         </div>
-                        <div class="claimed">This score was claimed by:<br>{row['email']}</div>
+                        <div class="claimed">This score was claimed by:<br><strong>"{row['nickname'] or 'Anonymous'}"</strong></div>
                         <div class="meta">
                             <p>Claimed on: {row['claimed_at'].strftime('%B %d, %Y at %I:%M %p')}</p>
                             <p>Game played on: {row['timestamp'].strftime('%B %d, %Y at %I:%M %p')}</p>
@@ -170,7 +177,7 @@ async def claim_page(session_id: str, request: Request):
                     .container {{ background: white; padding: 30px; border-radius: 10px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
                     .score {{ font-size: 24px; margin: 20px 0; background: #e9ecef; padding: 15px; border-radius: 5px; }}
                     .form {{ margin: 30px 0; }}
-                    input[type="email"] {{ padding: 12px; font-size: 16px; width: 300px; max-width: 100%; border: 2px solid #ddd; border-radius: 5px; }}
+                    input[type="email"], input[type="text"] {{ padding: 12px; font-size: 16px; width: 300px; max-width: 100%; border: 2px solid #ddd; border-radius: 5px; }}
                     button {{ padding: 12px 30px; font-size: 16px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; margin-top: 10px; transition: background 0.3s; }}
                     button:hover {{ background: #0056b3; }}
                     button:disabled {{ background: #6c757d; cursor: not-allowed; }}
@@ -196,15 +203,22 @@ async def claim_page(session_id: str, request: Request):
                     <div id="highScoreCheck"></div>
                     
                     <div class="form" id="claimSection">
-                        <p>Enter your email to claim this score:</p>
+                        <p><strong>Claim your score to join the leaderboard!</strong></p>
                         <form id="claimForm">
                             <input type="email" id="email" placeholder="your@email.com" required>
+                            <br>
+                            <input type="text" id="nickname" placeholder="Your leaderboard nickname" maxlength="20" required style="margin-top: 10px;">
+                            <br>
+                            <small style="color: #6c757d;">Nickname: 2-20 characters, letters, numbers, and basic symbols only</small>
                             <br>
                             <button type="submit" id="submitBtn">
                                 <span class="loading">⏳ Claiming...</span>
                                 <span class="normal">Claim Score</span>
                             </button>
                         </form>
+                        <p style="font-size: 12px; color: #6c757d; margin-top: 15px;">
+                            📧 Your email is used for score verification and updates. Only your nickname appears on the public leaderboard.
+                        </p>
                     </div>
                     
                     <div id="message"></div>
@@ -217,7 +231,7 @@ async def claim_page(session_id: str, request: Request):
                         .then(data => {{
                             if (data.is_high_score) {{
                                 document.getElementById('highScoreCheck').innerHTML = 
-                                    `<div class="high-score">🏆 Congratulations! This is a HIGH SCORE!<br>
+                                    `<div class="high-score">🏆 HIGH SCORE! You saved {total_savings_formatted}!<br>
                                     Rank #${{data.rank}} out of ${{data.total_scores}} players!</div>`;
                             }}
                         }})
@@ -226,6 +240,7 @@ async def claim_page(session_id: str, request: Request):
                     document.getElementById('claimForm').addEventListener('submit', async (e) => {{
                         e.preventDefault();
                         const email = document.getElementById('email').value;
+                        const nickname = document.getElementById('nickname').value;
                         const messageDiv = document.getElementById('message');
                         const submitBtn = document.getElementById('submitBtn');
                         
@@ -238,7 +253,7 @@ async def claim_page(session_id: str, request: Request):
                             const response = await fetch('/api/claim/{session_id}', {{
                                 method: 'POST',
                                 headers: {{ 'Content-Type': 'application/json' }},
-                                body: JSON.stringify({{ email: email }})
+                                body: JSON.stringify({{ email: email, nickname: nickname }})
                             }});
                             
                             const data = await response.json();
@@ -275,8 +290,8 @@ async def claim_page(session_id: str, request: Request):
         return HTMLResponse("Internal server error", status_code=500)
 
 @app.post("/api/claim/{session_id}", response_model=ClaimResponse)
-async def claim_score(session_id: str, email_data: EmailClaim):
-    """Claim a score with email"""
+async def claim_score(session_id: str, claim_data: ClaimData):
+    """Claim a score with email and nickname"""
     try:
         # First check if the score exists
         score = await database.get_score(session_id)
@@ -285,17 +300,22 @@ async def claim_score(session_id: str, email_data: EmailClaim):
         
         # Check if already claimed
         if score['email']:
-            raise HTTPException(status_code=400, detail="Score has already been claimed")
+            raise HTTPException(status_code=400, detail=f"Score has already been claimed")
+        
+        # Check if nickname is already taken
+        nickname_taken = await database.check_nickname_taken(claim_data.nickname, session_id)
+        if nickname_taken:
+            raise HTTPException(status_code=400, detail=f"Nickname '{claim_data.nickname}' is already taken. Please choose another.")
         
         # Claim the score
-        success = await database.claim_score(session_id, email_data.email)
+        success = await database.claim_score(session_id, claim_data.email, claim_data.nickname)
         if not success:
             raise HTTPException(status_code=400, detail="Failed to claim score")
         
         # Check if it's a high score
         high_score_info = await database.check_high_score(session_id)
         
-        logger.info(f"Score claimed for session {session_id} by {email_data.email}")
+        logger.info(f"Score claimed for session {session_id} by '{claim_data.nickname}' ({claim_data.email})")
         
         return ClaimResponse(
             success=True,
@@ -312,7 +332,7 @@ async def claim_score(session_id: str, email_data: EmailClaim):
 
 @app.get("/api/leaderboard")
 async def get_leaderboard(limit: int = 10):
-    """Get the leaderboard"""
+    """Get the leaderboard based on highest total savings"""
     try:
         scores = await database.get_leaderboard(limit)
         
@@ -320,18 +340,54 @@ async def get_leaderboard(limit: int = 10):
         for score in scores:
             leaderboard.append({
                 "rank": score['rank'],
-                "final_bill": format_money(score['final_bill']),
-                "total_savings": format_money(score['total_savings']),
-                "email": score['email'] if score['email'] else "Anonymous",
+                "total_savings": format_money(score['total_savings']),  # Primary score
+                "final_bill": format_money(score['final_bill']),       # Secondary info
+                "nickname": score['nickname'] if score['nickname'] else "Anonymous",
                 "timestamp": score['timestamp'].isoformat(),
                 "claimed": score['email'] is not None
             })
         
-        return {"leaderboard": leaderboard}
+        return {"leaderboard": leaderboard, "ranked_by": "total_savings"}
         
     except Exception as e:
         logger.error(f"Error getting leaderboard: {e}")
         raise HTTPException(status_code=500, detail="Failed to get leaderboard")
+
+@app.get("/api/admin/emails")
+async def get_emails(admin_key: str = None):
+    """Get all collected emails - protected endpoint for business use"""
+    # Simple admin protection - in production use proper authentication
+    if admin_key != os.getenv("ADMIN_KEY", "your_secret_admin_key"):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    try:
+        async with database.pool.acquire() as conn:
+            emails = await conn.fetch("""
+                SELECT email, nickname, total_savings, final_bill, claimed_at, timestamp
+                FROM scores 
+                WHERE email IS NOT NULL 
+                ORDER BY claimed_at DESC
+            """)
+        
+        email_list = []
+        for record in emails:
+            email_list.append({
+                "email": record['email'],
+                "nickname": record['nickname'],
+                "total_savings": record['total_savings'],
+                "final_bill": record['final_bill'],
+                "claimed_at": record['claimed_at'].isoformat(),
+                "game_played": record['timestamp'].isoformat()
+            })
+        
+        return {
+            "total_emails": len(email_list),
+            "emails": email_list
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting emails: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get emails")
 
 if __name__ == "__main__":
     import uvicorn

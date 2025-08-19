@@ -2,6 +2,10 @@ import asyncpg
 import os
 from datetime import datetime
 import logging
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -10,7 +14,7 @@ class Database:
         self.pool = None
         self.database_url = os.getenv("DATABASE_URL")
         if not self.database_url:
-            raise ValueError("DATABASE_URL environment variable is required")
+            raise ValueError("DATABASE_URL environment variable is required. Please check your .env file.")
 
     async def connect(self):
         """Create database connection pool"""
@@ -34,8 +38,9 @@ class Database:
             logger.info("Database connection pool closed")
 
     async def create_tables(self):
-        """Create database tables if they don't exist"""
+        """Create database tables if they don't exist and handle migrations"""
         async with self.pool.acquire() as conn:
+            # Create the base table
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS scores (
                     id SERIAL PRIMARY KEY,
@@ -49,24 +54,48 @@ class Database:
                 );
             """)
             
+            # Add nickname column if it doesn't exist (migration)
+            try:
+                await conn.execute("""
+                    ALTER TABLE scores ADD COLUMN IF NOT EXISTS nickname VARCHAR(25);
+                """)
+            except Exception as e:
+                # If ALTER TABLE IF NOT EXISTS doesn't work, try checking if column exists first
+                try:
+                    column_exists = await conn.fetchval("""
+                        SELECT column_name FROM information_schema.columns 
+                        WHERE table_name='scores' AND column_name='nickname';
+                    """)
+                    if not column_exists:
+                        await conn.execute("ALTER TABLE scores ADD COLUMN nickname VARCHAR(25);")
+                except Exception as e2:
+                    logger.warning(f"Could not add nickname column: {e2}")
+            
             # Create indexes for better performance
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_session_id ON scores(session_id);
-                CREATE INDEX IF NOT EXISTS idx_final_bill ON scores(final_bill);
-                CREATE INDEX IF NOT EXISTS idx_total_savings ON scores(total_savings DESC);
+                CREATE INDEX IF NOT EXISTS idx_total_savings_desc ON scores(total_savings DESC);
                 CREATE INDEX IF NOT EXISTS idx_claimed ON scores(email) WHERE email IS NOT NULL;
+                CREATE INDEX IF NOT EXISTS idx_timestamp ON scores(timestamp DESC);
             """)
+            
+            # Create nickname index only if column exists
+            try:
+                await conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_nickname ON scores(nickname) WHERE nickname IS NOT NULL;
+                    CREATE INDEX IF NOT EXISTS idx_email ON scores(email) WHERE email IS NOT NULL;
+                """)
+            except Exception as e:
+                logger.warning(f"Could not create nickname indexes: {e}")
             
         logger.info("Database tables created/verified")
 
     async def submit_score(self, session_id: str, final_bill: int, total_savings: int, timestamp: str):
         """Submit a new score to the database"""
         async with self.pool.acquire() as conn:
-            # Parse timestamp
-            try:
-                dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-            except ValueError:
-                dt = datetime.now()
+            # For simplicity, just use current UTC time
+            # The client timestamp is informational but we'll use server time for consistency
+            dt = datetime.utcnow()
             
             await conn.execute("""
                 INSERT INTO scores (session_id, final_bill, total_savings, timestamp)
@@ -80,17 +109,36 @@ class Database:
                 SELECT * FROM scores WHERE session_id = $1
             """, session_id)
 
-    async def claim_score(self, session_id: str, email: str):
-        """Claim a score with an email"""
+    async def claim_score(self, session_id: str, email: str, nickname: str):
+        """Claim a score with both email and nickname"""
         async with self.pool.acquire() as conn:
             result = await conn.execute("""
                 UPDATE scores 
-                SET email = $1, claimed_at = CURRENT_TIMESTAMP
-                WHERE session_id = $2 AND email IS NULL
-            """, email, session_id)
+                SET email = $1, nickname = $2, claimed_at = CURRENT_TIMESTAMP
+                WHERE session_id = $3 AND email IS NULL
+            """, email, nickname, session_id)
             
             # Check if update was successful (row was found and updated)
             return result == "UPDATE 1"
+
+    async def check_nickname_taken(self, nickname: str, exclude_session: str = None):
+        """Check if a nickname is already taken by another player"""
+        async with self.pool.acquire() as conn:
+            if exclude_session:
+                result = await conn.fetchval("""
+                    SELECT COUNT(*) FROM scores 
+                    WHERE LOWER(nickname) = LOWER($1) 
+                    AND session_id != $2
+                    AND nickname IS NOT NULL
+                """, nickname, exclude_session)
+            else:
+                result = await conn.fetchval("""
+                    SELECT COUNT(*) FROM scores 
+                    WHERE LOWER(nickname) = LOWER($1)
+                    AND nickname IS NOT NULL
+                """, nickname)
+            
+            return result > 0
 
     async def check_high_score(self, session_id: str):
         """Check if a score is a high score and get ranking info"""
@@ -103,12 +151,12 @@ class Database:
             if not score_row:
                 return None
             
-            # Calculate rank based on lowest final bill (better score = lower bill)
+            # Calculate rank based on highest total savings (better score = more savings)
             rank_row = await conn.fetchrow("""
                 SELECT COUNT(*) + 1 as rank
                 FROM scores 
-                WHERE final_bill < $1
-            """, score_row['final_bill'])
+                WHERE total_savings > $1
+            """, score_row['total_savings'])
             
             # Get total number of scores
             total_row = await conn.fetchrow("SELECT COUNT(*) as total FROM scores")
@@ -126,7 +174,7 @@ class Database:
             }
 
     async def get_leaderboard(self, limit: int = 10):
-        """Get top scores leaderboard"""
+        """Get top scores leaderboard based on total savings"""
         async with self.pool.acquire() as conn:
             return await conn.fetch("""
                 SELECT 
@@ -136,11 +184,11 @@ class Database:
                     email,
                     timestamp,
                     claimed_at,
-                    ROW_NUMBER() OVER (ORDER BY final_bill ASC) as rank
+                    ROW_NUMBER() OVER (ORDER BY total_savings DESC) as rank
                 FROM scores
-                ORDER BY final_bill ASC
+                ORDER BY total_savings DESC
                 LIMIT $1
             """, limit)
 
-# Global database instance
+# Global database instance - will be initialized when the module loads
 database = Database()

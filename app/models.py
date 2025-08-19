@@ -1,6 +1,7 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, validator
 from datetime import datetime
 from typing import Optional
+import re
 
 class ScoreSubmission(BaseModel):
     session_id: str
@@ -8,8 +9,29 @@ class ScoreSubmission(BaseModel):
     total_savings: int
     timestamp: str
 
-class EmailClaim(BaseModel):
+class ClaimData(BaseModel):
     email: EmailStr
+    nickname: str
+    
+    @validator('nickname')
+    def validate_nickname(cls, v):
+        # Clean and validate nickname
+        v = v.strip()
+        
+        if len(v) < 2:
+            raise ValueError('Nickname must be at least 2 characters long')
+        if len(v) > 20:
+            raise ValueError('Nickname must be 20 characters or less')
+        
+        # Allow letters, numbers, spaces, and basic symbols
+        if not re.match(r'^[a-zA-Z0-9\s\-_.!]+$', v):
+            raise ValueError('Nickname contains invalid characters')
+            
+        # Prevent all spaces/symbols
+        if not re.search(r'[a-zA-Z0-9]', v):
+            raise ValueError('Nickname must contain at least one letter or number')
+            
+        return v
 
 class ScoreResponse(BaseModel):
     success: bool
