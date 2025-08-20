@@ -173,22 +173,87 @@ class Database:
                 'total_scores': total
             }
 
-    async def get_leaderboard(self, limit: int = 10):
-        """Get top scores leaderboard based on total savings"""
+    async def get_leaderboard(self, limit: int = None):
+        """Get all scores for leaderboard (claimed and unclaimed)"""
         async with self.pool.acquire() as conn:
-            return await conn.fetch("""
-                SELECT 
-                    session_id,
-                    final_bill,
-                    total_savings,
-                    email,
-                    timestamp,
-                    claimed_at,
-                    ROW_NUMBER() OVER (ORDER BY total_savings DESC) as rank
-                FROM scores
-                ORDER BY total_savings DESC
-                LIMIT $1
-            """, limit)
+            # Check if nickname column exists first
+            try:
+                nickname_exists = await conn.fetchval("""
+                    SELECT column_name FROM information_schema.columns 
+                    WHERE table_name='scores' AND column_name='nickname';
+                """)
+                
+                if nickname_exists:
+                    # Include nickname in query if column exists
+                    query = """
+                        SELECT 
+                            session_id,
+                            final_bill,
+                            total_savings,
+                            email,
+                            nickname,
+                            timestamp,
+                            claimed_at,
+                            ROW_NUMBER() OVER (ORDER BY total_savings DESC) as rank
+                        FROM scores
+                        ORDER BY total_savings DESC
+                    """
+                else:
+                    # Fallback query without nickname column
+                    query = """
+                        SELECT 
+                            session_id,
+                            final_bill,
+                            total_savings,
+                            email,
+                            timestamp,
+                            claimed_at,
+                            ROW_NUMBER() OVER (ORDER BY total_savings DESC) as rank
+                        FROM scores
+                        ORDER BY total_savings DESC
+                    """
+                
+                if limit:
+                    query += f" LIMIT {limit}"
+                    
+                rows = await conn.fetch(query)
+                
+                # Convert to list of dictionaries and ensure nickname field exists
+                result = []
+                for row in rows:
+                    row_dict = dict(row)
+                    if 'nickname' not in row_dict:
+                        row_dict['nickname'] = None
+                    result.append(row_dict)
+                
+                return result
+                
+            except Exception as e:
+                logger.error(f"Error in get_leaderboard: {e}")
+                # Fallback to basic query without nickname
+                query = """
+                    SELECT 
+                        session_id,
+                        final_bill,
+                        total_savings,
+                        email,
+                        timestamp,
+                        claimed_at,
+                        ROW_NUMBER() OVER (ORDER BY total_savings DESC) as rank
+                    FROM scores
+                    ORDER BY total_savings DESC
+                """
+                if limit:
+                    query += f" LIMIT {limit}"
+                    
+                rows = await conn.fetch(query)
+                result = []
+                for row in rows:
+                    row_dict = dict(row)
+                    row_dict['nickname'] = None  # Add missing nickname field
+                    result.append(row_dict)
+                
+                return result
 
 # Global database instance - will be initialized when the module loads
 database = Database()

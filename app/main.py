@@ -332,26 +332,75 @@ async def claim_score(session_id: str, claim_data: ClaimData):
 
 @app.get("/api/leaderboard")
 async def get_leaderboard(limit: int = 10):
-    """Get the leaderboard based on highest total savings"""
+    """Get the leaderboard showing only claimed scores with nicknames"""
     try:
-        scores = await database.get_leaderboard(limit)
+        logger.info("Getting leaderboard")
+        all_scores = await database.get_leaderboard()
         
+        # Filter to only include claimed scores (those with nicknames and emails)
+        claimed_scores = []
+        for score in all_scores:
+            # Only include entries that have been claimed (have nickname and email)
+            # Use .get() to safely access potentially missing fields
+            nickname = score.get('nickname')
+            email = score.get('email')
+            
+            if nickname and email:
+                claimed_scores.append(score)
+        
+        # Sort by total_savings descending (highest savings first)
+        claimed_scores.sort(key=lambda x: x['total_savings'], reverse=True)
+        
+        # Take only the requested limit
+        top_scores = claimed_scores[:limit]
+        
+        # Format the leaderboard response
         leaderboard = []
-        for score in scores:
+        for i, score in enumerate(top_scores):
             leaderboard.append({
-                "rank": score['rank'],
-                "total_savings": format_money(score['total_savings']),  # Primary score
-                "final_bill": format_money(score['final_bill']),       # Secondary info
-                "nickname": score['nickname'] if score['nickname'] else "Anonymous",
+                "rank": i + 1,
+                "total_savings": format_money(score['total_savings']),
+                "final_bill": format_money(score['final_bill']),
+                "nickname": score.get('nickname', 'Anonymous'),
                 "timestamp": score['timestamp'].isoformat(),
-                "claimed": score['email'] is not None
+                "claimed": True  # All these are claimed by definition
             })
         
+        logger.info(f"Returning {len(leaderboard)} claimed scores for leaderboard")
         return {"leaderboard": leaderboard, "ranked_by": "total_savings"}
         
     except Exception as e:
         logger.error(f"Error getting leaderboard: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get leaderboard")
+        logger.error(f"Error type: {type(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get leaderboard: {str(e)}")
+
+@app.get("/api/all-scores")
+async def get_all_scores():
+    """Get all scores (claimed and unclaimed) for high score detection"""
+    try:
+        logger.info("Getting all scores for high score detection")
+        all_scores = await database.get_leaderboard()
+        
+        # Sort by total_savings descending
+        all_scores.sort(key=lambda x: x['total_savings'], reverse=True)
+        
+        # Add rank to each entry and return minimal data
+        formatted_scores = []
+        for i, score in enumerate(all_scores):
+            formatted_scores.append({
+                'total_savings': score['total_savings'],
+                'final_bill': score['final_bill'],
+                'rank': i + 1,
+                'claimed': bool(score.get('email'))  # True if claimed, False if not
+            })
+        
+        logger.info(f"Returning {len(formatted_scores)} total scores")
+        return formatted_scores
+        
+    except Exception as e:
+        logger.error(f"Error getting all scores: {e}")
+        logger.error(f"Error type: {type(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get all scores: {str(e)}")
 
 @app.get("/api/admin/emails")
 async def get_emails(admin_key: str = None):
