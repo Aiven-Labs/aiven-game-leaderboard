@@ -1,59 +1,87 @@
 # Don't include these in the Docker build context
 
-# Python cache
-__pycache__
+# Python cache and virtual environments
+__pycache__/
 *.pyc
 *.pyo
 *.pyd
 .Python
-
-# Virtual environments
 env/
 venv/
 .venv/
 ENV/
-
-# Development files
 .env
-.env.local
-.env.development
+.env.*
 
-# IDE files
+# IDE and editor files
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+.DS_Store
 
 # Git files
 .git/
 .gitignore
+.gitattributes
 
-# Documentation
+# Documentation and development files
 README.md
 *.md
+LICENSE
+docs/
+*.txt
+!requirements.txt
 
-# Logs
+# Development and build tools
+node_modules/
+package*.json
+rollup.config*.js
+tsconfig.json
+
+# Frontend game files (we only need the score server)
+src/
+docs/
+assets/
+
+# Logs and temporary files
 logs/
 *.log
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Docker files (don't need in container)
-docker-compose.yml
-Dockerfile
-.dockerignore
+tmp/
+temp/
 
 # Database files (using external DB)
 *.db
 *.sqlite
+*.sqlite3
 
-# Build scripts
-build-and-test.sh
-deploy-*.sh
+# OS generated files
+Thumbs.db
+.DS_Store
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Docker files (don't need in container)
+docker-compose*.yml
+Dockerfile*
+.dockerignore
 
 # Test files
 tests/
 test_*.py
 *_test.py
+pytest.ini
+.pytest_cache/
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+
+# Backup files
+*.bak
+*.backup
