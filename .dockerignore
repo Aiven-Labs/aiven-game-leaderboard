@@ -1,0 +1,59 @@
+# Don't include these in the Docker build context
+
+# Python cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+env/
+venv/
+.venv/
+ENV/
+
+# Development files
+.env
+.env.local
+.env.development
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git files
+.git/
+.gitignore
+
+# Documentation
+README.md
+*.md
+
+# Logs
+logs/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker files (don't need in container)
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+# Database files (using external DB)
+*.db
+*.sqlite
+
+# Build scripts
+build-and-test.sh
+deploy-*.sh
+
+# Test files
+tests/
+test_*.py
+*_test.py
