@@ -36,7 +36,7 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify your game's domain
+    allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),  # In production, specify your game's domain
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
