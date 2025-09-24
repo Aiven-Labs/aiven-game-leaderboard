@@ -126,6 +126,14 @@ class Database:
             return await conn.fetchrow("""
                 SELECT * FROM scores WHERE session_id = $1
             """, session_id)
+    
+    async def get_user_by_nickname(self, nickname: str):
+        """Get user info by nickname"""
+        async with self.pool.acquire() as conn:
+            return await conn.fetchrow(
+                "SELECT email, nickname FROM scores WHERE nickname = $1 AND email IS NOT NULL LIMIT 1",
+                nickname
+            )
 
     async def claim_score(self, session_id: str, email: str, nickname: str, company: str = None):
         """Claim a score with email, nickname, and optional company"""
@@ -140,42 +148,42 @@ class Database:
             return result == "UPDATE 1"
 
     async def check_nickname_taken(self, nickname: str, email: str = None, exclude_session: str = None):
-    """Check if a nickname is already taken by another player with different email"""
-    async with self.pool.acquire() as conn:
-        if email:
-            # Allow same email to reuse nickname
-            if exclude_session:
-                result = await conn.fetchval("""
-                    SELECT COUNT(*) FROM scores 
-                    WHERE LOWER(nickname) = LOWER($1) 
-                    AND email != $2
-                    AND session_id != $3
-                    AND nickname IS NOT NULL
-                """, nickname, email, exclude_session)
+        """Check if a nickname is already taken by another player with different email"""
+        async with self.pool.acquire() as conn:
+            if email:
+                # Allow same email to reuse nickname
+                if exclude_session:
+                    result = await conn.fetchval("""
+                        SELECT COUNT(*) FROM scores 
+                        WHERE LOWER(nickname) = LOWER($1) 
+                        AND email != $2
+                        AND session_id != $3
+                        AND nickname IS NOT NULL
+                    """, nickname, email, exclude_session)
+                else:
+                    result = await conn.fetchval("""
+                        SELECT COUNT(*) FROM scores 
+                        WHERE LOWER(nickname) = LOWER($1)
+                        AND email != $2
+                        AND nickname IS NOT NULL
+                    """, nickname, email)
             else:
-                result = await conn.fetchval("""
-                    SELECT COUNT(*) FROM scores 
-                    WHERE LOWER(nickname) = LOWER($1)
-                    AND email != $2
-                    AND nickname IS NOT NULL
-                """, nickname, email)
-        else:
-            # Original logic for when no email provided
-            if exclude_session:
-                result = await conn.fetchval("""
-                    SELECT COUNT(*) FROM scores 
-                    WHERE LOWER(nickname) = LOWER($1) 
-                    AND session_id != $2
-                    AND nickname IS NOT NULL
-                """, nickname, exclude_session)
-            else:
-                result = await conn.fetchval("""
-                    SELECT COUNT(*) FROM scores 
-                    WHERE LOWER(nickname) = LOWER($1)
-                    AND nickname IS NOT NULL
-                """, nickname)
-        
-        return result > 0
+                # Original logic for when no email provided
+                if exclude_session:
+                    result = await conn.fetchval("""
+                        SELECT COUNT(*) FROM scores 
+                        WHERE LOWER(nickname) = LOWER($1) 
+                        AND session_id != $2
+                        AND nickname IS NOT NULL
+                    """, nickname, exclude_session)
+                else:
+                    result = await conn.fetchval("""
+                        SELECT COUNT(*) FROM scores 
+                        WHERE LOWER(nickname) = LOWER($1)
+                        AND nickname IS NOT NULL
+                    """, nickname)
+            
+            return result > 0
 
     async def check_high_score(self, session_id: str):
         """Check if a score is a high score and get ranking info"""

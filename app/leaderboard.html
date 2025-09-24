@@ -15,7 +15,7 @@
         }
         
         .container {
-            max-width: 800px;
+            max-width: 1000px;
             margin: 0 auto;
         }
         
@@ -46,7 +46,7 @@
         
         .leaderboard-header {
             display: grid;
-            grid-template-columns: 60px 1fr 120px 120px 150px;
+            grid-template-columns: 60px 1fr 150px 120px 120px 150px;
             gap: 15px;
             padding: 15px 20px;
             background: rgba(255,255,255,0.2);
@@ -58,7 +58,7 @@
         
         .leaderboard-row {
             display: grid;
-            grid-template-columns: 60px 1fr 120px 120px 150px;
+            grid-template-columns: 60px 1fr 150px 120px 120px 150px;
             gap: 15px;
             padding: 15px 20px;
             background: rgba(255,255,255,0.1);
@@ -91,6 +91,15 @@
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+        }
+        
+        .company {
+            font-style: italic;
+            color: #B0C4DE;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 0.9em;
         }
         
         .savings {
@@ -150,6 +159,20 @@
             border-color: rgba(255,255,255,0.5);
         }
         
+        @media (max-width: 1024px) {
+            .leaderboard-header,
+            .leaderboard-row {
+                grid-template-columns: 50px 1fr 120px 100px 100px;
+                gap: 10px;
+                padding: 10px 15px;
+                font-size: 0.85em;
+            }
+            
+            .date {
+                display: none;
+            }
+        }
+        
         @media (max-width: 768px) {
             .leaderboard-header,
             .leaderboard-row {
@@ -159,7 +182,7 @@
                 font-size: 0.85em;
             }
             
-            .date {
+            .date, .company {
                 display: none;
             }
             
@@ -185,6 +208,7 @@
                 <div class="leaderboard-header">
                     <div>Rank</div>
                     <div>Player</div>
+                    <div>Company</div>
                     <div>Saved</div>
                     <div>Final Bill</div>
                     <div class="date-header">Date</div>
@@ -260,6 +284,7 @@
                         <div class="leaderboard-row">
                             <div class="rank ${score.rank <= 3 ? 'top-3 ' + getRankClass(score.rank) : ''}">${getRankDisplay(score.rank)}</div>
                             <div class="nickname">${escapeHtml(score.nickname)}</div>
+                            <div class="company">${score.company ? escapeHtml(score.company) : '—'}</div>
                             <div class="savings">${score.total_savings}</div>
                             <div class="bill">${score.final_bill}</div>
                             <div class="date">${formatDate(score.timestamp)}</div>
