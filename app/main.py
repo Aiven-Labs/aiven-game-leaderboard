@@ -115,10 +115,188 @@ async def claim_page(session_id: str, request: Request):
                 <head>
                     <title>Score Not Found</title>
                     <meta name="viewport" content="width=device-width, initial-scale=1">
-                    <style>
-                        body { font-family: Arial, sans-serif; text-align: center; margin: 50px; background: #f8f9fa; }
-                        .container { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); max-width: 500px; margin: 0 auto; }
-                    </style>
+<style>
+    * {
+        box-sizing: border-box;
+    }
+    
+    body { 
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; 
+        max-width: 600px; 
+        margin: 50px auto; 
+        padding: 20px; 
+        background: #000000; 
+        color: #ffffff;
+        line-height: 1.6;
+    }
+    
+    .container { 
+        background: #111111; 
+        padding: 40px; 
+        border-radius: 12px; 
+        text-align: center; 
+        border: 1px solid #333333;
+    }
+    
+    h1 {
+        color: #ffffff;
+        font-weight: 700;
+        margin-bottom: 20px;
+        font-size: 2em;
+    }
+    
+    .score { 
+        font-size: 1.3em; 
+        margin: 30px 0; 
+        background: #222222; 
+        padding: 25px; 
+        border-radius: 8px; 
+        border: 1px solid #333333;
+        color: #ffffff;
+        font-weight: 600;
+    }
+    
+    .form { 
+        margin: 30px 0; 
+    }
+    
+    input[type="email"], input[type="text"] { 
+        padding: 15px; 
+        font-size: 16px; 
+        width: 300px; 
+        max-width: 100%; 
+        border: 2px solid #333333; 
+        border-radius: 6px; 
+        margin: 8px 0; 
+        background: #222222; 
+        color: #ffffff;
+        transition: border-color 0.2s ease;
+    }
+    
+    input[type="email"]:focus, input[type="text"]:focus {
+        outline: none;
+        border-color: #FF6B35;
+    }
+    
+    input::placeholder {
+        color: #888888;
+    }
+    
+    button { 
+        padding: 15px 30px; 
+        font-size: 16px; 
+        background: #FF6B35; 
+        color: #000000; 
+        border: none; 
+        border-radius: 6px; 
+        cursor: pointer; 
+        margin-top: 20px; 
+        transition: all 0.2s ease; 
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    
+    button:hover { 
+        background: #e55a2b; 
+        transform: translateY(-1px);
+    }
+    
+    button:active {
+        transform: translateY(0);
+    }
+    
+    button:disabled { 
+        background: #666666; 
+        cursor: not-allowed; 
+        transform: none;
+    }
+    
+    .message { 
+        margin: 20px 0; 
+        padding: 20px; 
+        border-radius: 8px; 
+    }
+    
+    .success { 
+        background: #0f2e0f; 
+        color: #4CAF50; 
+        border: 1px solid #4CAF50; 
+    }
+    
+    .error { 
+        background: #2e0f0f; 
+        color: #FF6B6B; 
+        border: 1px solid #FF6B6B; 
+    }
+    
+    .high-score { 
+        background: #2e2200; 
+        color: #FFD700; 
+        border: 1px solid #FFD700; 
+        padding: 20px; 
+        margin: 25px 0; 
+        border-radius: 8px; 
+        animation: pulse 2s infinite; 
+        font-weight: 600;
+    }
+    
+    .claimed { 
+        color: #4CAF50; 
+        font-weight: 600; 
+        margin: 25px 0; 
+    }
+    
+    .meta { 
+        color: #888888; 
+        font-size: 14px; 
+        margin: 15px 0; 
+    }
+    
+    .optional { 
+        color: #888888; 
+        font-size: 12px; 
+    }
+    
+    .loading { 
+        display: none; 
+    }
+    
+    a {
+        color: #FF6B35;
+        text-decoration: none;
+        font-weight: 500;
+    }
+    
+    a:hover {
+        text-decoration: underline;
+    }
+    
+    @keyframes pulse { 
+        0% { opacity: 1; } 
+        50% { opacity: 0.7; } 
+        100% { opacity: 1; } 
+    }
+    
+    @media (max-width: 768px) {
+        body {
+            margin: 20px auto;
+            padding: 15px;
+        }
+        
+        .container {
+            padding: 25px;
+        }
+        
+        input[type="email"], input[type="text"] {
+            width: 100%;
+        }
+        
+        h1 {
+            font-size: 1.6em;
+        }
+    }
+</style>
                 </head>
                 <body>
                     <div class="container">
@@ -174,24 +352,188 @@ async def claim_page(session_id: str, request: Request):
             <head>
                 <title>Claim Your Score - Inkless Game</title>
                 <meta name="viewport" content="width=device-width, initial-scale=1">
-                <style>
-                    body {{ font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; background: #f8f9fa; }}
-                    .container {{ background: white; padding: 30px; border-radius: 10px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-                    .score {{ font-size: 24px; margin: 20px 0; background: #e9ecef; padding: 15px; border-radius: 5px; }}
-                    .form {{ margin: 30px 0; }}
-                    input[type="email"], input[type="text"] {{ padding: 12px; font-size: 16px; width: 300px; max-width: 100%; border: 2px solid #ddd; border-radius: 5px; margin-top: 10px; }}
-                    button {{ padding: 12px 30px; font-size: 16px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; margin-top: 15px; transition: background 0.3s; }}
-                    button:hover {{ background: #0056b3; }}
-                    button:disabled {{ background: #6c757d; cursor: not-allowed; }}
-                    .message {{ margin: 20px 0; padding: 15px; border-radius: 5px; }}
-                    .success {{ background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }}
-                    .error {{ background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }}
-                    .high-score {{ background: #fff3cd; color: #856404; border: 1px solid #ffeaa7; padding: 15px; margin: 20px 0; border-radius: 5px; animation: pulse 2s infinite; }}
-                    .meta {{ color: #6c757d; font-size: 14px; margin: 10px 0; }}
-                    .optional {{ color: #6c757d; font-size: 12px; }}
-                    @keyframes pulse {{ 0% {{ opacity: 1; }} 50% {{ opacity: 0.7; }} 100% {{ opacity: 1; }} }}
-                    .loading {{ display: none; }}
-                </style>
+<style>
+    * {
+        box-sizing: border-box;
+    }
+    
+    body { 
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; 
+        max-width: 600px; 
+        margin: 50px auto; 
+        padding: 20px; 
+        background: #000000; 
+        color: #ffffff;
+        line-height: 1.6;
+    }
+    
+    .container { 
+        background: #111111; 
+        padding: 40px; 
+        border-radius: 12px; 
+        text-align: center; 
+        border: 1px solid #333333;
+    }
+    
+    h1 {
+        color: #ffffff;
+        font-weight: 700;
+        margin-bottom: 20px;
+        font-size: 2em;
+    }
+    
+    .score { 
+        font-size: 1.3em; 
+        margin: 30px 0; 
+        background: #222222; 
+        padding: 25px; 
+        border-radius: 8px; 
+        border: 1px solid #333333;
+        color: #ffffff;
+        font-weight: 600;
+    }
+    
+    .form { 
+        margin: 30px 0; 
+    }
+    
+    input[type="email"], input[type="text"] { 
+        padding: 15px; 
+        font-size: 16px; 
+        width: 300px; 
+        max-width: 100%; 
+        border: 2px solid #333333; 
+        border-radius: 6px; 
+        margin: 8px 0; 
+        background: #222222; 
+        color: #ffffff;
+        transition: border-color 0.2s ease;
+    }
+    
+    input[type="email"]:focus, input[type="text"]:focus {
+        outline: none;
+        border-color: #FF6B35;
+    }
+    
+    input::placeholder {
+        color: #888888;
+    }
+    
+    button { 
+        padding: 15px 30px; 
+        font-size: 16px; 
+        background: #FF6B35; 
+        color: #000000; 
+        border: none; 
+        border-radius: 6px; 
+        cursor: pointer; 
+        margin-top: 20px; 
+        transition: all 0.2s ease; 
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    
+    button:hover { 
+        background: #e55a2b; 
+        transform: translateY(-1px);
+    }
+    
+    button:active {
+        transform: translateY(0);
+    }
+    
+    button:disabled { 
+        background: #666666; 
+        cursor: not-allowed; 
+        transform: none;
+    }
+    
+    .message { 
+        margin: 20px 0; 
+        padding: 20px; 
+        border-radius: 8px; 
+    }
+    
+    .success { 
+        background: #0f2e0f; 
+        color: #4CAF50; 
+        border: 1px solid #4CAF50; 
+    }
+    
+    .error { 
+        background: #2e0f0f; 
+        color: #FF6B6B; 
+        border: 1px solid #FF6B6B; 
+    }
+    
+    .high-score { 
+        background: #2e2200; 
+        color: #FFD700; 
+        border: 1px solid #FFD700; 
+        padding: 20px; 
+        margin: 25px 0; 
+        border-radius: 8px; 
+        animation: pulse 2s infinite; 
+        font-weight: 600;
+    }
+    
+    .claimed { 
+        color: #4CAF50; 
+        font-weight: 600; 
+        margin: 25px 0; 
+    }
+    
+    .meta { 
+        color: #888888; 
+        font-size: 14px; 
+        margin: 15px 0; 
+    }
+    
+    .optional { 
+        color: #888888; 
+        font-size: 12px; 
+    }
+    
+    .loading { 
+        display: none; 
+    }
+    
+    a {
+        color: #FF6B35;
+        text-decoration: none;
+        font-weight: 500;
+    }
+    
+    a:hover {
+        text-decoration: underline;
+    }
+    
+    @keyframes pulse { 
+        0% { opacity: 1; } 
+        50% { opacity: 0.7; } 
+        100% { opacity: 1; } 
+    }
+    
+    @media (max-width: 768px) {
+        body {
+            margin: 20px auto;
+            padding: 15px;
+        }
+        
+        .container {
+            padding: 25px;
+        }
+        
+        input[type="email"], input[type="text"] {
+            width: 100%;
+        }
+        
+        h1 {
+            font-size: 1.6em;
+        }
+    }
+</style>
             </head>
             <body>
                 <div class="container">

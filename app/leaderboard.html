@@ -5,13 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Inkless Game Leaderboard</title>
     <style>
+        * {
+            box-sizing: border-box;
+        }
+        
         body {
-            font-family: Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             margin: 0;
             padding: 20px;
-            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-            color: white;
+            background: #000000;
+            color: #ffffff;
             min-height: 100vh;
+            line-height: 1.6;
         }
         
         .container {
@@ -21,59 +26,65 @@
         
         .header {
             text-align: center;
-            margin-bottom: 30px;
+            margin-bottom: 40px;
         }
         
         .header h1 {
             margin: 0;
             font-size: 2.5em;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 10px;
         }
         
         .header p {
             margin: 10px 0 0 0;
-            opacity: 0.9;
-            font-size: 1.1em;
+            color: #cccccc;
+            font-size: 1.2em;
+            font-weight: 400;
         }
         
         .leaderboard {
-            background: rgba(255,255,255,0.1);
-            border-radius: 15px;
-            padding: 20px;
-            backdrop-filter: blur(10px);
-            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            background: #111111;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid #333333;
         }
         
         .leaderboard-header {
             display: grid;
             grid-template-columns: 60px 1fr 150px 120px 120px 150px;
             gap: 15px;
-            padding: 15px 20px;
-            background: rgba(255,255,255,0.2);
-            border-radius: 10px;
-            margin-bottom: 10px;
-            font-weight: bold;
-            font-size: 0.9em;
+            padding: 20px;
+            background: #FF6B35;
+            color: #000000;
+            font-weight: 600;
+            font-size: 0.95em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         
         .leaderboard-row {
             display: grid;
             grid-template-columns: 60px 1fr 150px 120px 120px 150px;
             gap: 15px;
-            padding: 15px 20px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 10px;
-            margin-bottom: 8px;
-            transition: background 0.3s ease;
+            padding: 20px;
+            background: #222222;
+            border-bottom: 1px solid #333333;
+            transition: background 0.2s ease;
             align-items: center;
         }
         
         .leaderboard-row:hover {
-            background: rgba(255,255,255,0.2);
+            background: #2a2a2a;
+        }
+        
+        .leaderboard-row:last-child {
+            border-bottom: none;
         }
         
         .rank {
-            font-weight: bold;
+            font-weight: 700;
             font-size: 1.2em;
             text-align: center;
         }
@@ -87,15 +98,15 @@
         .rank-3 { color: #CD7F32; }
         
         .nickname {
-            font-weight: bold;
+            font-weight: 600;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+            color: #ffffff;
         }
         
         .company {
-            font-style: italic;
-            color: #B0C4DE;
+            color: #999999;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -103,60 +114,72 @@
         }
         
         .savings {
-            font-weight: bold;
+            font-weight: 700;
             color: #4CAF50;
             text-align: right;
+            font-size: 1.1em;
         }
         
         .bill {
             color: #FF6B6B;
             text-align: right;
+            font-weight: 500;
         }
         
         .date {
-            font-size: 0.9em;
-            opacity: 0.8;
+            font-size: 0.85em;
+            color: #888888;
             text-align: right;
         }
         
         .loading {
             text-align: center;
-            padding: 40px;
+            padding: 60px;
             font-size: 1.1em;
+            color: #cccccc;
         }
         
         .error {
             text-align: center;
             padding: 40px;
             color: #FF6B6B;
-            background: rgba(255,107,107,0.1);
-            border-radius: 10px;
-            margin: 20px 0;
+            background: #1a0000;
+            border: 1px solid #FF6B6B;
+            border-radius: 8px;
+            margin: 20px;
         }
         
         .no-scores {
             text-align: center;
-            padding: 40px;
-            color: #FFD700;
-            font-size: 1.1em;
+            padding: 60px;
+            color: #FF6B35;
+            font-size: 1.2em;
+            font-weight: 500;
         }
         
         .refresh-btn {
-            background: rgba(255,255,255,0.2);
-            border: 2px solid rgba(255,255,255,0.3);
-            color: white;
-            padding: 10px 20px;
-            border-radius: 25px;
+            background: #FF6B35;
+            border: none;
+            color: #000000;
+            padding: 12px 24px;
+            border-radius: 6px;
             cursor: pointer;
-            font-size: 0.9em;
-            transition: all 0.3s ease;
-            margin: 20px auto;
+            font-size: 0.95em;
+            font-weight: 600;
+            transition: all 0.2s ease;
+            margin: 30px auto 0;
             display: block;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         
         .refresh-btn:hover {
-            background: rgba(255,255,255,0.3);
-            border-color: rgba(255,255,255,0.5);
+            background: #e55a2b;
+            transform: translateY(-1px);
+        }
+        
+        .refresh-btn:active {
+            transform: translateY(0);
         }
         
         @media (max-width: 1024px) {
@@ -164,7 +187,7 @@
             .leaderboard-row {
                 grid-template-columns: 50px 1fr 120px 100px 100px;
                 gap: 10px;
-                padding: 10px 15px;
+                padding: 15px;
                 font-size: 0.85em;
             }
             
@@ -174,12 +197,16 @@
         }
         
         @media (max-width: 768px) {
+            body {
+                padding: 15px;
+            }
+            
             .leaderboard-header,
             .leaderboard-row {
                 grid-template-columns: 50px 1fr 80px 80px;
                 gap: 10px;
-                padding: 10px 15px;
-                font-size: 0.85em;
+                padding: 15px 10px;
+                font-size: 0.8em;
             }
             
             .date, .company {
@@ -189,6 +216,10 @@
             .header h1 {
                 font-size: 2em;
             }
+            
+            .header p {
+                font-size: 1em;
+            }
         }
     </style>
 </head>
@@ -196,7 +227,7 @@
     <div class="container">
         <div class="header">
             <h1>🏆 Leaderboard</h1>
-            <p>Top players who saved the most on their AWS bills!</p>
+            <p>Top players who saved the most on their Kafka bills!</p>
         </div>
         
         <div class="leaderboard">
