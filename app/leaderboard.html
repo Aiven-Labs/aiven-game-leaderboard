@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inkless Game Leaderboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+        
+        .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        
+        .leaderboard {
+            background: rgba(255,255,255,0.1);
+            border-radius: 15px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        }
+        
+        .leaderboard-header {
+            display: grid;
+            grid-template-columns: 60px 1fr 120px 120px 150px;
+            gap: 15px;
+            padding: 15px 20px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 10px;
+            margin-bottom: 10px;
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+        
+        .leaderboard-row {
+            display: grid;
+            grid-template-columns: 60px 1fr 120px 120px 150px;
+            gap: 15px;
+            padding: 15px 20px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            margin-bottom: 8px;
+            transition: background 0.3s ease;
+            align-items: center;
+        }
+        
+        .leaderboard-row:hover {
+            background: rgba(255,255,255,0.2);
+        }
+        
+        .rank {
+            font-weight: bold;
+            font-size: 1.2em;
+            text-align: center;
+        }
+        
+        .rank.top-3 {
+            font-size: 1.5em;
+        }
+        
+        .rank-1 { color: #FFD700; }
+        .rank-2 { color: #C0C0C0; }
+        .rank-3 { color: #CD7F32; }
+        
+        .nickname {
+            font-weight: bold;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .savings {
+            font-weight: bold;
+            color: #4CAF50;
+            text-align: right;
+        }
+        
+        .bill {
+            color: #FF6B6B;
+            text-align: right;
+        }
+        
+        .date {
+            font-size: 0.9em;
+            opacity: 0.8;
+            text-align: right;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 1.1em;
+        }
+        
+        .error {
+            text-align: center;
+            padding: 40px;
+            color: #FF6B6B;
+            background: rgba(255,107,107,0.1);
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+        
+        .no-scores {
+            text-align: center;
+            padding: 40px;
+            color: #FFD700;
+            font-size: 1.1em;
+        }
+        
+        .refresh-btn {
+            background: rgba(255,255,255,0.2);
+            border: 2px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: all 0.3s ease;
+            margin: 20px auto;
+            display: block;
+        }
+        
+        .refresh-btn:hover {
+            background: rgba(255,255,255,0.3);
+            border-color: rgba(255,255,255,0.5);
+        }
+        
+        @media (max-width: 768px) {
+            .leaderboard-header,
+            .leaderboard-row {
+                grid-template-columns: 50px 1fr 80px 80px;
+                gap: 10px;
+                padding: 10px 15px;
+                font-size: 0.85em;
+            }
+            
+            .date {
+                display: none;
+            }
+            
+            .header h1 {
+                font-size: 2em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏆 Leaderboard</h1>
+            <p>Top players who saved the most on their AWS bills!</p>
+        </div>
+        
+        <div class="leaderboard">
+            <div id="loading" class="loading">
+                Loading leaderboard...
+            </div>
+            
+            <div id="content" style="display: none;">
+                <div class="leaderboard-header">
+                    <div>Rank</div>
+                    <div>Player</div>
+                    <div>Saved</div>
+                    <div>Final Bill</div>
+                    <div class="date-header">Date</div>
+                </div>
+                <div id="leaderboard-data"></div>
+            </div>
+            
+            <div id="error" style="display: none;" class="error">
+                Failed to load leaderboard. Please try again.
+            </div>
+        </div>
+        
+        <button class="refresh-btn" onclick="loadLeaderboard()">
+            🔄 Refresh
+        </button>
+    </div>
+
+    <script>
+        let API_BASE_URL = window.location.origin;
+        
+        // If this HTML is served from a different domain than your API,
+        // uncomment and set the correct API URL:
+        // API_BASE_URL = 'https://your-api-domain.com';
+
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleDateString('en-US', { 
+                month: 'short', 
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
+        function getRankClass(rank) {
+            if (rank === 1) return 'rank-1';
+            if (rank === 2) return 'rank-2';
+            if (rank === 3) return 'rank-3';
+            return '';
+        }
+
+        function getRankDisplay(rank) {
+            if (rank === 1) return '🥇';
+            if (rank === 2) return '🥈';
+            if (rank === 3) return '🥉';
+            return `#${rank}`;
+        }
+
+        async function loadLeaderboard() {
+            const loading = document.getElementById('loading');
+            const content = document.getElementById('content');
+            const error = document.getElementById('error');
+            const leaderboardData = document.getElementById('leaderboard-data');
+
+            // Show loading state
+            loading.style.display = 'block';
+            content.style.display = 'none';
+            error.style.display = 'none';
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/leaderboard?limit=20`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                
+                if (!data.leaderboard || data.leaderboard.length === 0) {
+                    leaderboardData.innerHTML = '<div class="no-scores">No scores claimed yet. Be the first!</div>';
+                } else {
+                    leaderboardData.innerHTML = data.leaderboard.map(score => `
+                        <div class="leaderboard-row">
+                            <div class="rank ${score.rank <= 3 ? 'top-3 ' + getRankClass(score.rank) : ''}">${getRankDisplay(score.rank)}</div>
+                            <div class="nickname">${escapeHtml(score.nickname)}</div>
+                            <div class="savings">${score.total_savings}</div>
+                            <div class="bill">${score.final_bill}</div>
+                            <div class="date">${formatDate(score.timestamp)}</div>
+                        </div>
+                    `).join('');
+                }
+
+                loading.style.display = 'none';
+                content.style.display = 'block';
+
+            } catch (err) {
+                console.error('Error loading leaderboard:', err);
+                loading.style.display = 'none';
+                error.style.display = 'block';
+                error.innerHTML = `
+                    <div class="error">
+                        Failed to load leaderboard.<br>
+                        <small>Error: ${err.message}</small>
+                    </div>
+                `;
+            }
+        }
+
+        function escapeHtml(unsafe) {
+            return unsafe
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        // Load leaderboard on page load
+        document.addEventListener('DOMContentLoaded', loadLeaderboard);
+
+        // Auto-refresh every 30 seconds
+        setInterval(loadLeaderboard, 30000);
+    </script>
+</body>
+</html>

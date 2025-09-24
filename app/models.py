@@ -12,6 +12,7 @@ class ScoreSubmission(BaseModel):
 class ClaimData(BaseModel):
     email: EmailStr
     nickname: str
+    company: Optional[str] = None
     
     @validator('nickname')
     def validate_nickname(cls, v):
@@ -30,6 +31,26 @@ class ClaimData(BaseModel):
         # Prevent all spaces/symbols
         if not re.search(r'[a-zA-Z0-9]', v):
             raise ValueError('Nickname must contain at least one letter or number')
+            
+        return v
+    
+    @validator('company')
+    def validate_company(cls, v):
+        if v is None:
+            return v
+        
+        # Clean and validate company
+        v = v.strip()
+        
+        if len(v) == 0:
+            return None  # Empty string becomes None
+            
+        if len(v) > 50:
+            raise ValueError('Company name must be 50 characters or less')
+        
+        # Allow letters, numbers, spaces, and common company symbols
+        if not re.match(r'^[a-zA-Z0-9\s\-_.&,()]+$', v):
+            raise ValueError('Company name contains invalid characters')
             
         return v
 

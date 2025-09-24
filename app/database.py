@@ -71,6 +71,23 @@ class Database:
                 except Exception as e2:
                     logger.warning(f"Could not add nickname column: {e2}")
             
+            # Add company column if it doesn't exist (new migration)
+            try:
+                await conn.execute("""
+                    ALTER TABLE scores ADD COLUMN IF NOT EXISTS company VARCHAR(50);
+                """)
+            except Exception as e:
+                # If ALTER TABLE IF NOT EXISTS doesn't work, try checking if column exists first
+                try:
+                    column_exists = await conn.fetchval("""
+                        SELECT column_name FROM information_schema.columns 
+                        WHERE table_name='scores' AND column_name='company';
+                    """)
+                    if not column_exists:
+                        await conn.execute("ALTER TABLE scores ADD COLUMN company VARCHAR(50);")
+                except Exception as e2:
+                    logger.warning(f"Could not add company column: {e2}")
+            
             # Create indexes for better performance
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_session_id ON scores(session_id);
@@ -79,14 +96,15 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_timestamp ON scores(timestamp DESC);
             """)
             
-            # Create nickname index only if column exists
+            # Create nickname and company indexes only if columns exist
             try:
                 await conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_nickname ON scores(nickname) WHERE nickname IS NOT NULL;
                     CREATE INDEX IF NOT EXISTS idx_email ON scores(email) WHERE email IS NOT NULL;
+                    CREATE INDEX IF NOT EXISTS idx_company ON scores(company) WHERE company IS NOT NULL;
                 """)
             except Exception as e:
-                logger.warning(f"Could not create nickname indexes: {e}")
+                logger.warning(f"Could not create nickname/company indexes: {e}")
             
         logger.info("Database tables created/verified")
 
@@ -109,21 +127,40 @@ class Database:
                 SELECT * FROM scores WHERE session_id = $1
             """, session_id)
 
-    async def claim_score(self, session_id: str, email: str, nickname: str):
-        """Claim a score with both email and nickname"""
+    async def claim_score(self, session_id: str, email: str, nickname: str, company: str = None):
+        """Claim a score with email, nickname, and optional company"""
         async with self.pool.acquire() as conn:
             result = await conn.execute("""
                 UPDATE scores 
-                SET email = $1, nickname = $2, claimed_at = CURRENT_TIMESTAMP
-                WHERE session_id = $3 AND email IS NULL
-            """, email, nickname, session_id)
+                SET email = $1, nickname = $2, company = $3, claimed_at = CURRENT_TIMESTAMP
+                WHERE session_id = $4 AND email IS NULL
+            """, email, nickname, company, session_id)
             
             # Check if update was successful (row was found and updated)
             return result == "UPDATE 1"
 
-    async def check_nickname_taken(self, nickname: str, exclude_session: str = None):
-        """Check if a nickname is already taken by another player"""
-        async with self.pool.acquire() as conn:
+    async def check_nickname_taken(self, nickname: str, email: str = None, exclude_session: str = None):
+    """Check if a nickname is already taken by another player with different email"""
+    async with self.pool.acquire() as conn:
+        if email:
+            # Allow same email to reuse nickname
+            if exclude_session:
+                result = await conn.fetchval("""
+                    SELECT COUNT(*) FROM scores 
+                    WHERE LOWER(nickname) = LOWER($1) 
+                    AND email != $2
+                    AND session_id != $3
+                    AND nickname IS NOT NULL
+                """, nickname, email, exclude_session)
+            else:
+                result = await conn.fetchval("""
+                    SELECT COUNT(*) FROM scores 
+                    WHERE LOWER(nickname) = LOWER($1)
+                    AND email != $2
+                    AND nickname IS NOT NULL
+                """, nickname, email)
+        else:
+            # Original logic for when no email provided
             if exclude_session:
                 result = await conn.fetchval("""
                     SELECT COUNT(*) FROM scores 
@@ -137,8 +174,8 @@ class Database:
                     WHERE LOWER(nickname) = LOWER($1)
                     AND nickname IS NOT NULL
                 """, nickname)
-            
-            return result > 0
+        
+        return result > 0
 
     async def check_high_score(self, session_id: str):
         """Check if a score is a high score and get ranking info"""
@@ -176,61 +213,63 @@ class Database:
     async def get_leaderboard(self, limit: int = None):
         """Get all scores for leaderboard (claimed and unclaimed)"""
         async with self.pool.acquire() as conn:
-            # Check if nickname column exists first
+            # Check if nickname and company columns exist first
             try:
                 nickname_exists = await conn.fetchval("""
                     SELECT column_name FROM information_schema.columns 
                     WHERE table_name='scores' AND column_name='nickname';
                 """)
                 
+                company_exists = await conn.fetchval("""
+                    SELECT column_name FROM information_schema.columns 
+                    WHERE table_name='scores' AND column_name='company';
+                """)
+                
+                # Build query based on available columns
+                select_fields = [
+                    "session_id",
+                    "final_bill", 
+                    "total_savings",
+                    "email",
+                    "timestamp",
+                    "claimed_at"
+                ]
+                
                 if nickname_exists:
-                    # Include nickname in query if column exists
-                    query = """
-                        SELECT 
-                            session_id,
-                            final_bill,
-                            total_savings,
-                            email,
-                            nickname,
-                            timestamp,
-                            claimed_at,
-                            ROW_NUMBER() OVER (ORDER BY total_savings DESC) as rank
-                        FROM scores
-                        ORDER BY total_savings DESC
-                    """
-                else:
-                    # Fallback query without nickname column
-                    query = """
-                        SELECT 
-                            session_id,
-                            final_bill,
-                            total_savings,
-                            email,
-                            timestamp,
-                            claimed_at,
-                            ROW_NUMBER() OVER (ORDER BY total_savings DESC) as rank
-                        FROM scores
-                        ORDER BY total_savings DESC
-                    """
+                    select_fields.append("nickname")
+                if company_exists:
+                    select_fields.append("company")
+                
+                select_clause = ", ".join(select_fields)
+                
+                query = f"""
+                    SELECT 
+                        {select_clause},
+                        ROW_NUMBER() OVER (ORDER BY total_savings DESC) as rank
+                    FROM scores
+                    ORDER BY total_savings DESC
+                """
                 
                 if limit:
                     query += f" LIMIT {limit}"
                     
                 rows = await conn.fetch(query)
                 
-                # Convert to list of dictionaries and ensure nickname field exists
+                # Convert to list of dictionaries and ensure all expected fields exist
                 result = []
                 for row in rows:
                     row_dict = dict(row)
                     if 'nickname' not in row_dict:
                         row_dict['nickname'] = None
+                    if 'company' not in row_dict:
+                        row_dict['company'] = None
                     result.append(row_dict)
                 
                 return result
                 
             except Exception as e:
                 logger.error(f"Error in get_leaderboard: {e}")
-                # Fallback to basic query without nickname
+                # Fallback to basic query without nickname/company
                 query = """
                     SELECT 
                         session_id,
@@ -250,7 +289,8 @@ class Database:
                 result = []
                 for row in rows:
                     row_dict = dict(row)
-                    row_dict['nickname'] = None  # Add missing nickname field
+                    row_dict['nickname'] = None  # Add missing fields
+                    row_dict['company'] = None
                     result.append(row_dict)
                 
                 return result
