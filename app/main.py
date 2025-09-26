@@ -426,14 +426,38 @@ async def claim_page(session_id: str, request: Request):
                             
                             const data = await response.json();
                             
-                            if (response.ok) {{
-                                let message = '<div class="success">✅ Score claimed successfully!</div>';
-                                if (data.is_high_score) {{
-                                    message += `<div class="high-score">🎉 High Score Confirmed! You ranked #${{data.rank}}!</div>`;
-                                }}
-                                messageDiv.innerHTML = message;
-                                document.getElementById('claimSection').style.display = 'none';
-                            }} else {{
+                        if (response.ok) {{
+                            let message = '<div class="success">✅ Score claimed successfully!</div>';
+                            if (data.is_high_score) {{
+                                message += `<div class="high-score">🎉 High Score Confirmed! You ranked #${{data.rank}}!</div>`;
+                            }}
+
+                            message += `
+                            <div style="margin-top: 20px; padding: 15px; border-radius: 5px;">
+                                <p><strong>Want to learn more about Inkless?</strong></p>
+                                <p>Join the Inkless mailing list</p>
+                                
+                                <form action="https://go.aiven.io/l/890043/2025-09-25/wqyqc" method="POST" target="_blank" style="display: inline-block;">
+                                    <input type="hidden" name="email" value="${{email}}">
+                                    <input type="hidden" name="first_name" value="${{nickname}}">
+                                    <input type="hidden" name="company" value="${{company || ''}}">
+                                    <input type="hidden" name="source" value="Inkless Game">
+                                    <input type="hidden" name="game_score" value="{row['total_savings']}">
+                                    <input type="hidden" name="final_bill" value="{row['final_bill']}">
+                                    <input type="hidden" name="retURL" value="https://aiven.io">
+                                    <input type="hidden" name="redirect" value="https://aiven.io">
+                                    <input type="hidden" name="return_url" value="https://aiven.io">
+                                    <input type="hidden" name="redirect_url" value="https://aiven.io">
+                                    <button type="submit" style="background: #007bff; color: white; padding: 10px 20px; 
+                                                                border: none; border-radius: 5px; cursor: pointer; font-size: 14px;">
+                                        Register for Inkless mailing list
+                                    </button>
+                                </form>
+                            </div>`;
+
+                            messageDiv.innerHTML = message;
+                            document.getElementById('claimSection').style.display = 'none';
+                        }} else {{
                                 messageDiv.innerHTML = '<div class="error">❌ ' + data.detail + '</div>';
                                 // Reset button
                                 submitBtn.disabled = false;
