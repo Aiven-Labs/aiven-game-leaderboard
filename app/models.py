@@ -21,8 +21,8 @@ class ClaimData(BaseModel):
         
         if len(v) < 2:
             raise ValueError('Nickname must be at least 2 characters long')
-        if len(v) > 20:
-            raise ValueError('Nickname must be 20 characters or less')
+        if len(v) > 50:  # Changed from 20 to 50
+            raise ValueError('Nickname must be 50 characters or less')
         
         # Allow letters, numbers, spaces, and basic symbols
         if not re.match(r'^[a-zA-Z0-9\s\-_.!]+$', v):
@@ -45,8 +45,8 @@ class ClaimData(BaseModel):
         if len(v) == 0:
             return None  # Empty string becomes None
             
-        if len(v) > 50:
-            raise ValueError('Company name must be 50 characters or less')
+        if len(v) > 100:  # Increased from 50 to 100
+            raise ValueError('Company name must be 100 characters or less')
         
         # Allow letters, numbers, spaces, and common company symbols
         if not re.match(r'^[a-zA-Z0-9\s\-_.&,()]+$', v):

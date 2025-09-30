@@ -345,20 +345,285 @@ async def claim_page(session_id: str, request: Request):
                 </html>
             """)
         
-        # Show claim form
+       # Show claim form
         return HTMLResponse(f"""
             <!DOCTYPE html>
-            <html>
+            <html lang="en">
             <head>
+                <meta charset="UTF-8">
                 <title>Claim Your Score - Inkless Game</title>
                 <meta name="viewport" content="width=device-width, initial-scale=1">
+                <style>
+                    * {{
+                        box-sizing: border-box;
+                    }}
+                    
+                    body {{
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                        margin: 0;
+                        padding: 20px;
+                        background: #000000;
+                        color: #ffffff;
+                        min-height: 100vh;
+                        line-height: 1.6;
+                    }}
+                    
+                    .container {{
+                        max-width: 600px;
+                        margin: 0 auto;
+                    }}
+                    
+                    h1 {{
+                        text-align: center;
+                        font-size: 2.5em;
+                        font-weight: 700;
+                        color: #ffffff;
+                        margin: 0 0 30px 0;
+                    }}
+                    
+                    .score {{
+                        background: #111111;
+                        border: 1px solid #333333;
+                        border-radius: 12px;
+                        padding: 30px;
+                        margin-bottom: 20px;
+                        text-align: center;
+                        font-size: 1.3em;
+                    }}
+                    
+                    .score strong {{
+                        color: #FF6B35;
+                        display: inline-block;
+                        min-width: 140px;
+                    }}
+                    
+                    .savings-value {{
+                        color: #4CAF50;
+                        font-weight: 700;
+                        font-size: 1.2em;
+                    }}
+                    
+                    .bill-value {{
+                        color: #FF6B6B;
+                        font-weight: 700;
+                    }}
+                    
+                    .meta {{
+                        text-align: center;
+                        color: #888888;
+                        font-size: 0.9em;
+                        margin-bottom: 20px;
+                    }}
+                    
+                    .high-score {{
+                        background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
+                        color: #000000;
+                        padding: 20px;
+                        border-radius: 12px;
+                        text-align: center;
+                        margin: 20px 0;
+                        font-weight: 700;
+                        font-size: 1.2em;
+                        border: 2px solid #FFD700;
+                        animation: pulse 2s infinite;
+                    }}
+                    
+                    @keyframes pulse {{
+                        0%, 100% {{ transform: scale(1); }}
+                        50% {{ transform: scale(1.02); }}
+                    }}
+                    
+                    .form {{
+                        background: #111111;
+                        border: 1px solid #333333;
+                        border-radius: 12px;
+                        padding: 30px;
+                        margin: 20px 0;
+                    }}
+                    
+                    .form p {{
+                        text-align: center;
+                        font-size: 1.1em;
+                        margin: 0 0 25px 0;
+                        color: #FF6B35;
+                    }}
+                    
+                    .form input {{
+                        width: 100%;
+                        padding: 14px;
+                        margin: 10px 0;
+                        background: #222222;
+                        border: 1px solid #444444;
+                        border-radius: 6px;
+                        color: #ffffff;
+                        font-size: 1em;
+                        transition: border-color 0.2s ease;
+                    }}
+                    
+                    .form input:focus {{
+                        outline: none;
+                        border-color: #FF6B35;
+                    }}
+                    
+                    .form input::placeholder {{
+                        color: #666666;
+                    }}
+                    
+                    .form small {{
+                        display: block;
+                        color: #888888;
+                        font-size: 0.85em;
+                        margin: -5px 0 10px 5px;
+                    }}
+                    
+                    .form small.optional {{
+                        color: #666666;
+                    }}
+                    
+                    .consent-text {{
+                        background: #1a1a1a;
+                        border-left: 3px solid #FF6B35;
+                        padding: 15px;
+                        margin: 20px 0;
+                        font-size: 0.95em;
+                        color: #cccccc;
+                        line-height: 1.6;
+                        border-radius: 4px;
+                    }}
+                    
+                    button {{
+                        width: 100%;
+                        padding: 16px;
+                        background: #FF6B35;
+                        border: none;
+                        border-radius: 6px;
+                        color: #000000;
+                        font-size: 1.1em;
+                        font-weight: 600;
+                        cursor: pointer;
+                        transition: all 0.2s ease;
+                        text-transform: uppercase;
+                        letter-spacing: 0.5px;
+                        margin-top: 10px;
+                    }}
+                    
+                    button:hover {{
+                        background: #e55a2b;
+                        transform: translateY(-1px);
+                    }}
+                    
+                    button:active {{
+                        transform: translateY(0);
+                    }}
+                    
+                    button:disabled {{
+                        background: #444444;
+                        cursor: not-allowed;
+                        transform: none;
+                    }}
+                    
+                    .loading {{
+                        display: none;
+                    }}
+                    
+                    .success {{
+                        background: #1a4d2e;
+                        border: 1px solid #4CAF50;
+                        color: #4CAF50;
+                        padding: 20px;
+                        border-radius: 12px;
+                        text-align: center;
+                        margin: 20px 0;
+                        font-size: 1.2em;
+                        font-weight: 600;
+                    }}
+                    
+                    .error {{
+                        background: #1a0000;
+                        border: 1px solid #FF6B6B;
+                        color: #FF6B6B;
+                        padding: 20px;
+                        border-radius: 12px;
+                        text-align: center;
+                        margin: 20px 0;
+                        font-weight: 600;
+                    }}
+                    
+                    .thank-you {{
+                        background: #111111;
+                        border: 1px solid #333333;
+                        border-radius: 12px;
+                        padding: 30px;
+                        margin-top: 20px;
+                        border-left: 4px solid #FF6B35;
+                    }}
+                    
+                    .thank-you h2 {{
+                        margin: 0 0 15px 0;
+                        font-size: 1.4em;
+                        color: #FF6B35;
+                    }}
+                    
+                    .thank-you p {{
+                        color: #cccccc;
+                        margin: 10px 0;
+                        line-height: 1.6;
+                    }}
+                    
+                    .thank-you a {{
+                        display: inline-block;
+                        background: #FF6B35;
+                        color: #000000;
+                        padding: 14px 28px;
+                        text-decoration: none;
+                        border-radius: 6px;
+                        font-weight: 600;
+                        margin-top: 15px;
+                        transition: all 0.2s ease;
+                        text-transform: uppercase;
+                        letter-spacing: 0.5px;
+                        font-size: 0.95em;
+                    }}
+                    
+                    .thank-you a:hover {{
+                        background: #e55a2b;
+                        transform: translateY(-1px);
+                    }}
+                    
+                    .privacy-note {{
+                        text-align: center;
+                        color: #666666;
+                        font-size: 0.85em;
+                        margin-top: 15px;
+                    }}
+                    
+                    @media (max-width: 768px) {{
+                        body {{
+                            padding: 15px;
+                        }}
+                        
+                        h1 {{
+                            font-size: 2em;
+                        }}
+                        
+                        .score {{
+                            font-size: 1.1em;
+                            padding: 20px;
+                        }}
+                        
+                        .form {{
+                            padding: 20px;
+                        }}
+                    }}
+                </style>
             </head>
             <body>
                 <div class="container">
                     <h1>🎮 Claim Your Score!</h1>
+                    
                     <div class="score">
-                        <strong>Final Bill:</strong> {final_bill_formatted}<br>
-                        <strong>Total Saved:</strong> {total_savings_formatted}
+                        <div><strong>Total Saved:</strong> <span class="savings-value">{total_savings_formatted}</span></div>
+                        <div style="margin-top: 10px;"><strong>Final Bill:</strong> <span class="bill-value">{final_bill_formatted}</span></div>
                     </div>
                     
                     <div class="meta">Game played on: {row['timestamp'].strftime('%B %d, %Y at %I:%M %p')}</div>
@@ -366,26 +631,31 @@ async def claim_page(session_id: str, request: Request):
                     <div id="highScoreCheck"></div>
                     
                     <div class="form" id="claimSection">
-                        <p><strong>Claim your score to join the leaderboard!</strong></p>
+                        <p><strong>Join the leaderboard!</strong></p>
                         <form id="claimForm">
                             <input type="email" id="email" placeholder="your@email.com" required>
-                            <br>
-                            <input type="text" id="nickname" placeholder="Your leaderboard nickname" maxlength="20" required>
-                            <br>
-                            <small style="color: #6c757d;">Nickname: 2-20 characters, letters, numbers, and basic symbols only</small>
-                            <br>
-                            <input type="text" id="company" placeholder="Company name (optional)" maxlength="50">
-                            <br>
-                            <small class="optional">Company field is optional</small>
-                            <br>
+                            
+                            <input type="text" id="nickname" placeholder="Your name" maxlength="50" required>
+                            <small>Your name will appear on the leaderboard</small>
+                            
+                            <input type="text" id="company" placeholder="Company name (optional)" maxlength="100">
+                            
+                            <input type="text" id="title" placeholder="Job title (optional)" maxlength="100">
+                            <small class="optional">Company and title fields are optional</small>
+                            
+                            <div class="consent-text">
+                                By submitting, you agree to receive updates about Aiven Inkless and similar product releases.
+                            </div>
+                            
                             <button type="submit" id="submitBtn">
                                 <span class="loading">⏳ Claiming...</span>
                                 <span class="normal">Claim Score</span>
                             </button>
                         </form>
-                        <p style="font-size: 12px; color: #6c757d; margin-top: 15px;">
-                            📧 Your email is used for score verification and updates. Only your nickname and company (if provided) appear on the public leaderboard.
-                        </p>
+                        
+                        <div class="privacy-note">
+                            📧 Your email is used for score verification and product updates.
+                        </div>
                     </div>
                     
                     <div id="message"></div>
@@ -409,6 +679,7 @@ async def claim_page(session_id: str, request: Request):
                         const email = document.getElementById('email').value;
                         const nickname = document.getElementById('nickname').value;
                         const company = document.getElementById('company').value || null;
+                        const title = document.getElementById('title').value || null;
                         const messageDiv = document.getElementById('message');
                         const submitBtn = document.getElementById('submitBtn');
                         
@@ -418,46 +689,64 @@ async def claim_page(session_id: str, request: Request):
                         submitBtn.querySelector('.normal').style.display = 'none';
                         
                         try {{
+                            // First, submit to your backend for leaderboard
                             const response = await fetch('/api/claim/{session_id}', {{
                                 method: 'POST',
                                 headers: {{ 'Content-Type': 'application/json' }},
-                                body: JSON.stringify({{ email: email, nickname: nickname, company: company }})
+                                body: JSON.stringify({{ 
+                                    email: email, 
+                                    nickname: nickname, 
+                                    company: company 
+                                }})
                             }});
                             
                             const data = await response.json();
                             
-                        if (response.ok) {{
-                            let message = '<div class="success">✅ Score claimed successfully!</div>';
-                            if (data.is_high_score) {{
-                                message += `<div class="high-score">🎉 High Score Confirmed! You ranked #${{data.rank}}!</div>`;
-                            }}
-
-                            message += `
-                            <div style="margin-top: 20px; padding: 15px; border-radius: 5px;">
-                                <p><strong>Want to learn more about Inkless?</strong></p>
-                                <p>Join the Inkless mailing list</p>
+                            if (response.ok) {{
+                                // Split nickname into first and last name
+                                const nameParts = nickname.trim().split(' ');
+                                const firstName = nameParts[0] || nickname;
+                                const lastName = nameParts.slice(1).join(' ') || nickname;
                                 
-                                <form action="https://go.aiven.io/l/890043/2025-09-25/wqyqc" method="POST" target="_blank" style="display: inline-block;">
-                                    <input type="hidden" name="email" value="${{email}}">
-                                    <input type="hidden" name="first_name" value="${{nickname}}">
-                                    <input type="hidden" name="company" value="${{company || ''}}">
-                                    <input type="hidden" name="source" value="Inkless Game">
-                                    <input type="hidden" name="game_score" value="{row['total_savings']}">
-                                    <input type="hidden" name="final_bill" value="{row['final_bill']}">
-                                    <input type="hidden" name="retURL" value="https://aiven.io">
-                                    <input type="hidden" name="redirect" value="https://aiven.io">
-                                    <input type="hidden" name="return_url" value="https://aiven.io">
-                                    <input type="hidden" name="redirect_url" value="https://aiven.io">
-                                    <button type="submit" style="background: #007bff; color: white; padding: 10px 20px; 
-                                                                border: none; border-radius: 5px; cursor: pointer; font-size: 14px;">
-                                        Register for Inkless mailing list
-                                    </button>
-                                </form>
-                            </div>`;
-
-                            messageDiv.innerHTML = message;
-                            document.getElementById('claimSection').style.display = 'none';
-                        }} else {{
+                                // Submit to Salesforce form handler
+                                const formData = new FormData();
+                                formData.append('email', email);
+                                formData.append('first_name', firstName);
+                                formData.append('last_name', lastName);
+                                if (company) formData.append('company', company);
+                                if (title) formData.append('title', title);
+                                formData.append('source', 'Inkless Game - Disk Invaders');
+                                formData.append('game_score', '{row["total_savings"]}');
+                                formData.append('final_bill', '{row["final_bill"]}');
+                                
+                                // Submit to Salesforce (non-blocking)
+                                fetch('https://go.aiven.io/l/890043/2025-09-25/wqyqc', {{
+                                    method: 'POST',
+                                    body: formData,
+                                    mode: 'no-cors'
+                                }}).catch(err => console.log('Salesforce submission failed:', err));
+                                
+                                // Show success message
+                                let message = '<div class="success">✅ Score claimed successfully!</div>';
+                                if (data.is_high_score) {{
+                                    message += `<div class="high-score">🎉 High Score Confirmed! You ranked #${{data.rank}}!</div>`;
+                                }}
+                                
+                                message += `
+                                <div class="thank-you">
+                                    <h2>✨ Thank you for playing!</h2>
+                                    <p>
+                                        You've been added to our Inkless updates list. We'll keep you informed 
+                                        about new features and product releases.
+                                    </p>
+                                    <a href="https://aiven.io/inkless" target="_blank">
+                                        Learn More About Inkless →
+                                    </a>
+                                </div>`;
+                                
+                                messageDiv.innerHTML = message;
+                                document.getElementById('claimSection').style.display = 'none';
+                            }} else {{
                                 messageDiv.innerHTML = '<div class="error">❌ ' + data.detail + '</div>';
                                 // Reset button
                                 submitBtn.disabled = false;
@@ -465,6 +754,7 @@ async def claim_page(session_id: str, request: Request):
                                 submitBtn.querySelector('.normal').style.display = 'inline';
                             }}
                         }} catch (err) {{
+                            console.error('Error:', err);
                             messageDiv.innerHTML = '<div class="error">❌ Error claiming score. Please try again.</div>';
                             // Reset button
                             submitBtn.disabled = false;

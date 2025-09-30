@@ -57,7 +57,7 @@ class Database:
             # Add nickname column if it doesn't exist (migration)
             try:
                 await conn.execute("""
-                    ALTER TABLE scores ADD COLUMN IF NOT EXISTS nickname VARCHAR(25);
+                    ALTER TABLE scores ADD COLUMN IF NOT EXISTS nickname VARCHAR(50);
                 """)
             except Exception as e:
                 # If ALTER TABLE IF NOT EXISTS doesn't work, try checking if column exists first
