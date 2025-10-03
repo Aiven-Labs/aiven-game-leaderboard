@@ -662,107 +662,139 @@ async def claim_page(session_id: str, request: Request):
                 </div>
 
                 <script>
-                    // Check if this is a high score
-                    fetch('/api/check-high-score/{session_id}')
-                        .then(response => response.json())
-                        .then(data => {{
-                            if (data.is_high_score) {{
-                                document.getElementById('highScoreCheck').innerHTML = 
-                                    `<div class="high-score">🏆 HIGH SCORE! You saved {total_savings_formatted}!<br>
-                                    Rank #${{data.rank}} out of ${{data.total_scores}} players!</div>`;
-                            }}
-                        }})
-                        .catch(err => console.log('Could not check high score status'));
+                // Check if this is a high score
+                fetch('/api/check-high-score/{session_id}')
+                    .then(response => response.json())
+                    .then(data => {{
+                        if (data.is_high_score) {{
+                            document.getElementById('highScoreCheck').innerHTML = 
+                                `<div class="high-score">🏆 HIGH SCORE! You saved {total_savings_formatted}!<br>
+                                Rank #${{data.rank}} out of ${{data.total_scores}} players!</div>`;
+                        }}
+                    }})
+                    .catch(err => console.log('Could not check high score status'));
 
-                    document.getElementById('claimForm').addEventListener('submit', async (e) => {{
-                        e.preventDefault();
-                        const email = document.getElementById('email').value;
-                        const nickname = document.getElementById('nickname').value;
-                        const company = document.getElementById('company').value || null;
-                        const title = document.getElementById('title').value || null;
-                        const messageDiv = document.getElementById('message');
-                        const submitBtn = document.getElementById('submitBtn');
+                document.getElementById('claimForm').addEventListener('submit', async (e) => {{
+                    e.preventDefault();
+                    const email = document.getElementById('email').value;
+                    const nickname = document.getElementById('nickname').value;
+                    const company = document.getElementById('company').value || null;
+                    const title = document.getElementById('title').value || null;
+                    const messageDiv = document.getElementById('message');
+                    const submitBtn = document.getElementById('submitBtn');
+                    
+                    // Show loading state
+                    submitBtn.disabled = true;
+                    submitBtn.querySelector('.loading').style.display = 'inline';
+                    submitBtn.querySelector('.normal').style.display = 'none';
+                    
+                    try {{
+                        // First, submit to your backend for leaderboard
+                        const response = await fetch('/api/claim/{session_id}', {{
+                            method: 'POST',
+                            headers: {{ 'Content-Type': 'application/json' }},
+                            body: JSON.stringify({{ 
+                                email: email, 
+                                nickname: nickname, 
+                                company: company 
+                            }})
+                        }});
                         
-                        // Show loading state
-                        submitBtn.disabled = true;
-                        submitBtn.querySelector('.loading').style.display = 'inline';
-                        submitBtn.querySelector('.normal').style.display = 'none';
+                        const data = await response.json();
                         
-                        try {{
-                            // First, submit to your backend for leaderboard
-                            const response = await fetch('/api/claim/{session_id}', {{
-                                method: 'POST',
-                                headers: {{ 'Content-Type': 'application/json' }},
-                                body: JSON.stringify({{ 
-                                    email: email, 
-                                    nickname: nickname, 
-                                    company: company 
-                                }})
+                        if (response.ok) {{
+                            const nameParts = nickname.trim().split(' ');
+                            const firstName = nameParts[0] || nickname;
+                            const lastName = nameParts.slice(1).join(' ') || nameParts[0];
+                            
+                            // Submit to Salesforce via hidden form (bypasses CORS)
+                            const iframe = document.createElement('iframe');
+                            iframe.name = 'salesforce-target';
+                            iframe.style.display = 'none';
+                            document.body.appendChild(iframe);
+                            
+                            const form = document.createElement('form');
+                            form.target = 'salesforce-target';
+                            form.method = 'POST';
+                            form.action = 'https://go.aiven.io/l/890043/2025-09-25/wqyqc';
+                            
+                            const fields = {{
+                                email: email,
+                                first_name: firstName,
+                                last_name: lastName,
+                                company: company || 'Not Provided',
+                                title: title || '',
+                                source: 'Inkless Game - Disk Invaders'
+                            }};
+                            
+                            Object.entries(fields).forEach(([key, value]) => {{
+                                const input = document.createElement('input');
+                                input.type = 'hidden';
+                                input.name = key;
+                                input.value = value;
+                                form.appendChild(input);
                             }});
                             
-                            const data = await response.json();
+                            document.body.appendChild(form);
+                            form.submit();
                             
-                            if (response.ok) {{
-                                // Split nickname into first and last name
-                                const nameParts = nickname.trim().split(' ');
-                                const firstName = nameParts[0] || nickname;
-                                const lastName = nameParts.slice(1).join(' ') || nickname;
-                                
-                                // Submit to Salesforce form handler
-                                const formData = new FormData();
-                                formData.append('email', email);
-                                formData.append('first_name', firstName);
-                                formData.append('last_name', lastName);
-                                if (company) formData.append('company', company);
-                                if (title) formData.append('title', title);
-                                formData.append('source', 'Inkless Game - Disk Invaders');
-                                formData.append('game_score', '{row["total_savings"]}');
-                                formData.append('final_bill', '{row["final_bill"]}');
-                                
-                                // Submit to Salesforce (non-blocking)
-                                fetch('https://go.aiven.io/l/890043/2025-09-25/wqyqc', {{
-                                    method: 'POST',
-                                    body: formData,
-                                    mode: 'no-cors'
-                                }}).catch(err => console.log('Salesforce submission failed:', err));
-                                
-                                // Show success message
-                                let message = '<div class="success">✅ Score claimed successfully!</div>';
-                                if (data.is_high_score) {{
-                                    message += `<div class="high-score">🎉 High Score Confirmed! You ranked #${{data.rank}}!</div>`;
-                                }}
-                                
-                                message += `
-                                <div class="thank-you">
-                                    <h2>✨ Thank you for playing!</h2>
-                                    <p>
-                                        You've been added to our Inkless updates list. We'll keep you informed 
-                                        about new features and product releases.
-                                    </p>
-                                    <a href="https://aiven.io/inkless" target="_blank">
-                                        Learn More About Inkless →
-                                    </a>
-                                </div>`;
-                                
-                                messageDiv.innerHTML = message;
-                                document.getElementById('claimSection').style.display = 'none';
-                            }} else {{
-                                messageDiv.innerHTML = '<div class="error">❌ ' + data.detail + '</div>';
-                                // Reset button
-                                submitBtn.disabled = false;
-                                submitBtn.querySelector('.loading').style.display = 'none';
-                                submitBtn.querySelector('.normal').style.display = 'inline';
+                            // Cleanup after 2 seconds
+                            setTimeout(() => {{
+                                if (document.body.contains(form)) document.body.removeChild(form);
+                                if (document.body.contains(iframe)) document.body.removeChild(iframe);
+                            }}, 2000);
+                            
+                            // Show success message
+                            let message = '<div class="success">✅ Score claimed successfully!</div>';
+                            if (data.is_high_score) {{
+                                message += `<div class="high-score">🎉 High Score Confirmed! You ranked #${{data.rank}}!</div>`;
                             }}
-                        }} catch (err) {{
-                            console.error('Error:', err);
-                            messageDiv.innerHTML = '<div class="error">❌ Error claiming score. Please try again.</div>';
-                            // Reset button
+                            
+                            message += `
+                            <div class="thank-you">
+                                <h2>✨ Thank you for playing!</h2>
+                                <p>
+                                    You've been added to our Inkless updates list. We'll keep you informed 
+                                    about new features and product releases.
+                                </p>
+                                <a href="https://aiven.io/inkless" target="_blank">
+                                    Learn More About Inkless →
+                                </a>
+                            </div>`;
+                            
+                            messageDiv.innerHTML = message;
+                            document.getElementById('claimSection').style.display = 'none';
+                        }} else {{
+                            let errorMessage = 'An error occurred';
+                            
+                            if (data.detail) {{
+                                if (typeof data.detail === 'string') {{
+                                    errorMessage = data.detail;
+                                }} else if (Array.isArray(data.detail)) {{
+                                    const errors = data.detail.map(err => {{
+                                        const field = err.loc ? err.loc.join('.') : 'unknown';
+                                        return `${{field}}: ${{err.msg}}`;
+                                    }});
+                                    errorMessage = errors.join('<br>');
+                                }} else if (typeof data.detail === 'object') {{
+                                    errorMessage = JSON.stringify(data.detail);
+                                }}
+                            }}
+                            
+                            messageDiv.innerHTML = '<div class="error">❌ ' + errorMessage + '</div>';
                             submitBtn.disabled = false;
                             submitBtn.querySelector('.loading').style.display = 'none';
                             submitBtn.querySelector('.normal').style.display = 'inline';
                         }}
-                    }});
-                </script>
+                    }} catch (err) {{
+                        console.error('Error:', err);
+                        messageDiv.innerHTML = '<div class="error">❌ Error claiming score. Please try again.</div>';
+                        submitBtn.disabled = false;
+                        submitBtn.querySelector('.loading').style.display = 'none';
+                        submitBtn.querySelector('.normal').style.display = 'inline';
+                    }}
+                }});
+            </script>
             </body>
             </html>
         """)

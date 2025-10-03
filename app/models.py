@@ -21,15 +21,16 @@ class ClaimData(BaseModel):
         
         if len(v) < 2:
             raise ValueError('Nickname must be at least 2 characters long')
-        if len(v) > 50:  # Changed from 20 to 50
+        if len(v) > 50:
             raise ValueError('Nickname must be 50 characters or less')
         
-        # Allow letters, numbers, spaces, and basic symbols
-        if not re.match(r'^[a-zA-Z0-9\s\-_.!]+$', v):
-            raise ValueError('Nickname contains invalid characters')
+        # Allow Unicode letters, numbers, spaces, hyphens, apostrophes, and periods
+        # This covers names like: José, O'Brien, Jean-Luc, Dr. Smith, Müller, 中村
+        if not re.match(r"^[\w\s\-'.]+$", v, re.UNICODE):
+            raise ValueError('Nickname can only contain letters, numbers, spaces, hyphens, apostrophes, and periods')
             
-        # Prevent all spaces/symbols
-        if not re.search(r'[a-zA-Z0-9]', v):
+        # Prevent all spaces/symbols - must have at least one letter or number
+        if not re.search(r'\w', v, re.UNICODE):
             raise ValueError('Nickname must contain at least one letter or number')
             
         return v
@@ -39,17 +40,16 @@ class ClaimData(BaseModel):
         if v is None:
             return v
         
-        # Clean and validate company
         v = v.strip()
         
         if len(v) == 0:
-            return None  # Empty string becomes None
+            return None
             
-        if len(v) > 100:  # Increased from 50 to 100
+        if len(v) > 100:
             raise ValueError('Company name must be 100 characters or less')
         
-        # Allow letters, numbers, spaces, and common company symbols
-        if not re.match(r'^[a-zA-Z0-9\s\-_.&,()]+$', v):
+        # Allow Unicode letters, numbers, spaces, and common company symbols
+        if not re.match(r'^[\w\s\-_.&,()]+$', v, re.UNICODE):
             raise ValueError('Company name contains invalid characters')
             
         return v
