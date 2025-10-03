@@ -196,21 +196,26 @@ class Database:
             if not score_row:
                 return None
             
-            # Calculate rank based on highest total savings (better score = more savings)
+            # Calculate rank based on highest total savings among CLAIMED scores only
             rank_row = await conn.fetchrow("""
                 SELECT COUNT(*) + 1 as rank
                 FROM scores 
                 WHERE total_savings > $1
+                AND email IS NOT NULL
             """, score_row['total_savings'])
             
-            # Get total number of scores
-            total_row = await conn.fetchrow("SELECT COUNT(*) as total FROM scores")
+            # Get total number of CLAIMED scores
+            total_row = await conn.fetchrow("""
+                SELECT COUNT(*) as total 
+                FROM scores 
+                WHERE email IS NOT NULL
+            """)
             
             rank = rank_row['rank']
             total = total_row['total']
             
             # Consider top 10% as "high scores"
-            is_high_score = rank <= max(1, total * 0.1)
+            is_high_score = rank <= max(1, total * 0.1) if total > 0 else False
             
             return {
                 'is_high_score': is_high_score,
