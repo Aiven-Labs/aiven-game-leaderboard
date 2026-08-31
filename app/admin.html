@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Disk Invaders - Score Admin</title>
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #000000;
+            color: #ffffff;
+            min-height: 100vh;
+            line-height: 1.6;
+        }
+
+        .container { max-width: 1500px; margin: 0 auto; }
+
+        .header {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-bottom: 8px;
+        }
+
+        .header h1 { margin: 0; font-size: 2em; font-weight: 700; }
+        .header .muted { color: #999999; font-size: 0.95em; }
+
+        .toolbar {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin: 24px 0 16px;
+        }
+
+        input[type="text"], input[type="email"], input[type="password"] {
+            background: #1a1a1a;
+            border: 1px solid #333333;
+            border-radius: 6px;
+            color: #ffffff;
+            padding: 9px 12px;
+            font-size: 0.95em;
+            font-family: inherit;
+        }
+
+        input:focus { outline: 2px solid #FF6B35; outline-offset: -1px; }
+
+        #search { flex: 1; min-width: 220px; }
+
+        button {
+            background: #FF6B35;
+            border: none;
+            border-radius: 6px;
+            color: #000000;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.9em;
+            font-weight: 600;
+            padding: 9px 16px;
+        }
+
+        button:hover { background: #ff8155; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        button.secondary { background: #2a2a2a; color: #ffffff; }
+        button.secondary:hover { background: #383838; }
+        button.danger { background: #3a1f1f; color: #FF6B6B; }
+        button.danger:hover { background: #4d2626; }
+
+        .table-wrap {
+            background: #111111;
+            border: 1px solid #333333;
+            border-radius: 12px;
+            overflow-x: auto;
+        }
+
+        table { border-collapse: collapse; width: 100%; min-width: 1100px; }
+
+        th {
+            background: #FF6B35;
+            color: #000000;
+            font-size: 0.85em;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            padding: 14px 12px;
+            text-align: left;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
+        td {
+            background: #222222;
+            border-bottom: 1px solid #333333;
+            padding: 12px;
+            vertical-align: middle;
+        }
+
+        tr:hover td { background: #2a2a2a; }
+
+        .rank { font-weight: 700; text-align: center; width: 60px; }
+        .rank-1 { color: #FFD700; }
+        .rank-2 { color: #C0C0C0; }
+        .rank-3 { color: #CD7F32; }
+
+        .nickname { font-weight: 600; }
+        .company, .email { color: #999999; font-size: 0.9em; }
+        .savings { color: #4CAF50; font-weight: 700; text-align: right; white-space: nowrap; }
+        .bill { color: #FF6B6B; text-align: right; white-space: nowrap; }
+        .date { color: #888888; font-size: 0.85em; white-space: nowrap; }
+        .actions { text-align: right; white-space: nowrap; }
+        .actions button { padding: 6px 12px; font-size: 0.85em; }
+
+        .pill {
+            border-radius: 999px;
+            font-size: 0.75em;
+            font-weight: 600;
+            padding: 3px 10px;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
+        .pill.claimed { background: #1f3a24; color: #4CAF50; }
+        .pill.unclaimed { background: #2a2a2a; color: #999999; }
+
+        tr.editing td { background: #2f2517; }
+        tr.editing input { width: 100%; min-width: 90px; }
+
+        .message { padding: 40px; text-align: center; color: #cccccc; }
+        .message.error { color: #FF6B6B; }
+
+        /* Login gate */
+        .gate {
+            align-items: center;
+            display: flex;
+            justify-content: center;
+            min-height: 70vh;
+        }
+
+        .gate-card {
+            background: #111111;
+            border: 1px solid #333333;
+            border-radius: 12px;
+            max-width: 380px;
+            padding: 32px;
+            width: 100%;
+        }
+
+        .gate-card h2 { margin: 0 0 6px; font-size: 1.3em; }
+        .gate-card p { color: #999999; font-size: 0.9em; margin: 0 0 20px; }
+        .gate-card input { margin-bottom: 12px; width: 100%; }
+        .gate-card button { width: 100%; }
+        .gate-error { color: #FF6B6B; font-size: 0.9em; margin-top: 12px; min-height: 1.4em; }
+
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Password gate: shown until /admin/api/scores stops answering 401 -->
+        <div id="gate" class="gate hidden">
+            <form class="gate-card" id="login-form">
+                <h2>Score admin</h2>
+                <p>Disk Invaders leaderboard console</p>
+                <input type="password" id="password" placeholder="Admin password" autocomplete="current-password" required>
+                <button type="submit">Sign in</button>
+                <div class="gate-error" id="gate-error"></div>
+            </form>
+        </div>
+
+        <!-- Console -->
+        <div id="console" class="hidden">
+            <div class="header">
+                <h1>Score admin</h1>
+                <span class="muted" id="summary"></span>
+            </div>
+
+            <div class="toolbar">
+                <input type="text" id="search" placeholder="Filter by nickname, company or email…">
+                <button id="export-all">Export CSV</button>
+                <button class="secondary" id="export-claimed">Export claimed only</button>
+                <button class="secondary" id="refresh">Refresh</button>
+                <button class="secondary" id="logout">Sign out</button>
+            </div>
+
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="rank">#</th>
+                            <th>Nickname</th>
+                            <th>Company</th>
+                            <th>Email</th>
+                            <th style="text-align:right">Savings</th>
+                            <th style="text-align:right">Final bill</th>
+                            <th>Status</th>
+                            <th style="text-align:right">Played</th>
+                            <th class="actions">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rows"></tbody>
+                </table>
+                <div class="message hidden" id="table-message"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let scores = [];
+        let editingId = null;
+
+        const el = (id) => document.getElementById(id);
+
+        function showGate(message) {
+            el('gate').classList.remove('hidden');
+            el('console').classList.add('hidden');
+            el('gate-error').textContent = message || '';
+            el('password').focus();
+        }
+
+        function showConsole() {
+            el('gate').classList.add('hidden');
+            el('console').classList.remove('hidden');
+        }
+
+        function money(amount) {
+            return amount >= 1000 ? '$' + (amount / 1000).toFixed(1) + 'k' : '$' + amount;
+        }
+
+        function shortDate(iso) {
+            if (!iso) return '—';
+            const d = new Date(iso);
+            return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+        }
+
+        function escapeHtml(value) {
+            return (value === null || value === undefined ? '' : String(value))
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        // Scores are player-supplied text, so every cell goes through escapeHtml
+        function renderRow(score) {
+            const rankClass = score.rank <= 3 ? ' rank-' + score.rank : '';
+
+            if (score.session_id === editingId) {
+                return `
+                    <tr class="editing" data-session="${escapeHtml(score.session_id)}">
+                        <td class="rank${rankClass}">${score.rank}</td>
+                        <td><input type="text" data-field="nickname" value="${escapeHtml(score.nickname)}" placeholder="nickname"></td>
+                        <td><input type="text" data-field="company" value="${escapeHtml(score.company)}" placeholder="company"></td>
+                        <td><input type="email" data-field="email" value="${escapeHtml(score.email)}" placeholder="email"></td>
+                        <td class="savings">${money(score.total_savings)}</td>
+                        <td class="bill">${money(score.final_bill)}</td>
+                        <td><span class="pill ${score.claimed ? 'claimed' : 'unclaimed'}">${score.claimed ? 'claimed' : 'unclaimed'}</span></td>
+                        <td class="date">${shortDate(score.played_at)}</td>
+                        <td class="actions">
+                            <button data-action="save">Save</button>
+                            <button class="secondary" data-action="cancel">Cancel</button>
+                        </td>
+                    </tr>`;
+            }
+
+            return `
+                <tr data-session="${escapeHtml(score.session_id)}">
+                    <td class="rank${rankClass}">${score.rank}</td>
+                    <td class="nickname">${escapeHtml(score.nickname) || '<span class="company">—</span>'}</td>
+                    <td class="company">${escapeHtml(score.company) || '—'}</td>
+                    <td class="email">${escapeHtml(score.email) || '—'}</td>
+                    <td class="savings">${money(score.total_savings)}</td>
+                    <td class="bill">${money(score.final_bill)}</td>
+                    <td><span class="pill ${score.claimed ? 'claimed' : 'unclaimed'}">${score.claimed ? 'claimed' : 'unclaimed'}</span></td>
+                    <td class="date">${shortDate(score.played_at)}</td>
+                    <td class="actions">
+                        <button class="secondary" data-action="edit">Edit</button>
+                        <button class="danger" data-action="delete">Delete</button>
+                    </td>
+                </tr>`;
+        }
+
+        function render() {
+            const term = el('search').value.trim().toLowerCase();
+            const visible = term
+                ? scores.filter((s) => [s.nickname, s.company, s.email]
+                    .some((f) => (f || '').toLowerCase().includes(term)))
+                : scores;
+
+            el('rows').innerHTML = visible.map(renderRow).join('');
+
+            const message = el('table-message');
+            if (!visible.length) {
+                message.textContent = scores.length
+                    ? 'No scores match that filter.'
+                    : 'No scores yet.';
+                message.classList.remove('hidden', 'error');
+            } else {
+                message.classList.add('hidden');
+            }
+
+            const claimed = scores.filter((s) => s.claimed).length;
+            el('summary').textContent =
+                `${scores.length} scores · ${claimed} claimed` +
+                (term ? ` · showing ${visible.length}` : '');
+        }
+
+        async function load() {
+            const message = el('table-message');
+            try {
+                const res = await fetch('/admin/api/scores', { credentials: 'same-origin' });
+
+                if (res.status === 401) {
+                    showGate();
+                    return;
+                }
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+
+                const data = await res.json();
+                scores = data.scores;
+                showConsole();
+                render();
+            } catch (err) {
+                showConsole();
+                message.textContent = 'Could not load scores: ' + err.message;
+                message.classList.remove('hidden');
+                message.classList.add('error');
+            }
+        }
+
+        el('login-form').addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const body = new FormData();
+            body.append('password', el('password').value);
+
+            try {
+                const res = await fetch('/admin/login', {
+                    method: 'POST',
+                    body,
+                    credentials: 'same-origin'
+                });
+
+                if (!res.ok) {
+                    const detail = await res.json().catch(() => ({}));
+                    el('gate-error').textContent = detail.detail || 'Sign in failed';
+                    return;
+                }
+
+                el('password').value = '';
+                el('gate-error').textContent = '';
+                await load();
+            } catch (err) {
+                el('gate-error').textContent = 'Sign in failed: ' + err.message;
+            }
+        });
+
+        el('rows').addEventListener('click', async (event) => {
+            const button = event.target.closest('button');
+            if (!button) return;
+
+            const row = button.closest('tr');
+            const sessionId = row.dataset.session;
+            const action = button.dataset.action;
+
+            if (action === 'edit') {
+                editingId = sessionId;
+                render();
+                return;
+            }
+
+            if (action === 'cancel') {
+                editingId = null;
+                render();
+                return;
+            }
+
+            if (action === 'save') {
+                const payload = {};
+                row.querySelectorAll('input[data-field]').forEach((input) => {
+                    payload[input.dataset.field] = input.value.trim() || null;
+                });
+
+                button.disabled = true;
+                try {
+                    const res = await fetch('/admin/api/scores/' + encodeURIComponent(sessionId), {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                        credentials: 'same-origin'
+                    });
+
+                    if (res.status === 401) return showGate('Session expired — sign in again');
+
+                    if (!res.ok) {
+                        const detail = await res.json().catch(() => ({}));
+                        alert('Could not save: ' + describe(detail));
+                        button.disabled = false;
+                        return;
+                    }
+
+                    editingId = null;
+                    await load();
+                } catch (err) {
+                    alert('Could not save: ' + err.message);
+                    button.disabled = false;
+                }
+                return;
+            }
+
+            if (action === 'delete') {
+                const score = scores.find((s) => s.session_id === sessionId);
+                const label = (score && score.nickname) || 'this unclaimed score';
+                if (!confirm(`Delete ${label}? This cannot be undone.`)) return;
+
+                button.disabled = true;
+                try {
+                    const res = await fetch('/admin/api/scores/' + encodeURIComponent(sessionId), {
+                        method: 'DELETE',
+                        credentials: 'same-origin'
+                    });
+
+                    if (res.status === 401) return showGate('Session expired — sign in again');
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+
+                    await load();
+                } catch (err) {
+                    alert('Could not delete: ' + err.message);
+                    button.disabled = false;
+                }
+            }
+        });
+
+        // FastAPI validation errors arrive as a list of objects
+        function describe(detail) {
+            const d = detail.detail;
+            if (typeof d === 'string') return d;
+            if (Array.isArray(d)) return d.map((e) => e.msg).join('; ');
+            return 'unknown error';
+        }
+
+        el('search').addEventListener('input', render);
+        el('refresh').addEventListener('click', load);
+        el('export-all').addEventListener('click', () => { window.location = '/admin/export.csv'; });
+        el('export-claimed').addEventListener('click', () => { window.location = '/admin/export.csv?claimed_only=true'; });
+
+        el('logout').addEventListener('click', async () => {
+            await fetch('/admin/logout', { method: 'POST', credentials: 'same-origin' });
+            scores = [];
+            showGate('Signed out');
+        });
+
+        load();
+    </script>
+</body>
+</html>

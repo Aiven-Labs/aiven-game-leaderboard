@@ -308,5 +308,59 @@ class Database:
                 
                 return result
 
+    async def get_all_scores_admin(self):
+        """Get every score with all columns, for the admin console"""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT
+                    id,
+                    session_id,
+                    final_bill,
+                    total_savings,
+                    timestamp,
+                    email,
+                    nickname,
+                    company,
+                    claimed_at,
+                    created_at
+                FROM scores
+                ORDER BY total_savings DESC
+            """)
+            return [dict(row) for row in rows]
+
+    async def admin_update_score(self, session_id: str, nickname, company, email):
+        """Update the player-supplied fields of a score.
+
+        Only nickname, company and email are editable - the bill and savings are
+        the game's result and are deliberately not writable from the console.
+        A score that gains an email counts as claimed, so claimed_at is
+        backfilled when it is still null.
+        """
+        async with self.pool.acquire() as conn:
+            result = await conn.execute("""
+                UPDATE scores
+                SET nickname = $1::varchar,
+                    company = $2::varchar,
+                    email = $3::varchar,
+                    claimed_at = CASE
+                        WHEN $3::varchar IS NOT NULL AND claimed_at IS NULL THEN CURRENT_TIMESTAMP
+                        WHEN $3::varchar IS NULL THEN NULL
+                        ELSE claimed_at
+                    END
+                WHERE session_id = $4
+            """, nickname, company, email, session_id)
+
+            return result == "UPDATE 1"
+
+    async def admin_delete_score(self, session_id: str):
+        """Delete a score outright - used to clear out test and junk entries"""
+        async with self.pool.acquire() as conn:
+            result = await conn.execute("""
+                DELETE FROM scores WHERE session_id = $1
+            """, session_id)
+
+            return result == "DELETE 1"
+
+
 # Global database instance - will be initialized when the module loads
 database = Database()

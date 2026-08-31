@@ -1,14 +1,27 @@
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi import Depends, FastAPI, Form, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from datetime import datetime
+import asyncio
+import csv
+import hashlib
+import hmac
+import io
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 
 from .database import database
-from .models import ScoreSubmission, ClaimData, ScoreResponse, HighScoreCheck, ClaimResponse
+from .models import (
+    ScoreSubmission,
+    ClaimData,
+    ScoreResponse,
+    HighScoreCheck,
+    ClaimResponse,
+    AdminScoreUpdate,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -962,6 +975,242 @@ async def get_all_scores():
         logger.error(f"Error getting all scores: {e}")
         logger.error(f"Error type: {type(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get all scores: {str(e)}")
+
+# ---------------------------------------------------------------------------
+# Admin console authentication
+#
+# A single shared password (ADMIN_KEY) exchanged for an HMAC-signed, HttpOnly
+# session cookie, so the secret stops travelling in URLs and referrers the way
+# ?admin_key= does. The cookie is signed with ADMIN_KEY itself, which means
+# rotating the password invalidates every live session.
+#
+# If ADMIN_KEY is unset the console fails closed rather than opening up.
+# ---------------------------------------------------------------------------
+
+ADMIN_SESSION_COOKIE = "inkless_admin"
+ADMIN_SESSION_TTL_SECONDS = 12 * 60 * 60
+
+
+def _admin_key() -> str:
+    return os.getenv("ADMIN_KEY", "")
+
+
+def _sign_admin_session(expires_at: int) -> str:
+    mac = hmac.new(
+        _admin_key().encode(), str(expires_at).encode(), hashlib.sha256
+    ).hexdigest()
+    return f"{expires_at}.{mac}"
+
+
+def _admin_session_valid(token: str) -> bool:
+    key = _admin_key()
+    if not key or not token:
+        return False
+
+    expires_raw, _, mac = token.partition(".")
+    if not mac:
+        return False
+
+    try:
+        expires_at = int(expires_raw)
+    except ValueError:
+        return False
+
+    if expires_at < time.time():
+        return False
+
+    expected = hmac.new(key.encode(), expires_raw.encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, mac)
+
+
+def require_admin(request: Request):
+    """Dependency guarding every admin data route"""
+    if not _admin_session_valid(request.cookies.get(ADMIN_SESSION_COOKIE, "")):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+
+@app.post("/admin/login")
+async def admin_login(request: Request, response: Response, password: str = Form(...)):
+    """Exchange the shared password for a session cookie"""
+    key = _admin_key()
+
+    if not key:
+        logger.error("Admin login attempted but ADMIN_KEY is not configured")
+        raise HTTPException(status_code=503, detail="Admin console is not configured")
+
+    if not hmac.compare_digest(password, key):
+        # Small fixed delay to take the edge off password guessing
+        await asyncio.sleep(0.5)
+        logger.warning("Failed admin login attempt")
+        raise HTTPException(status_code=401, detail="Incorrect password")
+
+    expires_at = int(time.time()) + ADMIN_SESSION_TTL_SECONDS
+    response.set_cookie(
+        ADMIN_SESSION_COOKIE,
+        _sign_admin_session(expires_at),
+        max_age=ADMIN_SESSION_TTL_SECONDS,
+        httponly=True,
+        samesite="lax",
+        secure=request.url.scheme == "https",
+    )
+    logger.info("Admin logged in")
+    return {"success": True}
+
+
+@app.post("/admin/logout")
+async def admin_logout(response: Response):
+    """Clear the admin session cookie"""
+    response.delete_cookie(ADMIN_SESSION_COOKIE)
+    return {"success": True}
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_page():
+    """Serve the admin console.
+
+    Always served; the page itself shows a password prompt until
+    /admin/api/scores stops answering 401.
+    """
+    admin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "admin.html")
+
+    try:
+        with open(admin_path, "r", encoding="utf-8") as handle:
+            return HTMLResponse(content=handle.read())
+    except FileNotFoundError:
+        logger.error(f"Admin template missing at {admin_path}")
+        raise HTTPException(status_code=500, detail="Admin console template missing")
+
+
+@app.get("/admin/api/scores", dependencies=[Depends(require_admin)])
+async def admin_list_scores():
+    """Every score, all columns, ranked by savings"""
+    try:
+        rows = await database.get_all_scores_admin()
+
+        scores = []
+        for index, row in enumerate(rows):
+            scores.append(
+                {
+                    "rank": index + 1,
+                    "session_id": row["session_id"],
+                    "nickname": row["nickname"],
+                    "company": row["company"],
+                    "email": row["email"],
+                    "total_savings": row["total_savings"],
+                    "final_bill": row["final_bill"],
+                    "claimed": bool(row["email"]),
+                    "played_at": row["timestamp"].isoformat() if row["timestamp"] else None,
+                    "claimed_at": row["claimed_at"].isoformat() if row["claimed_at"] else None,
+                }
+            )
+
+        return {"total": len(scores), "scores": scores}
+
+    except Exception as e:
+        logger.error(f"Error listing scores for admin: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list scores")
+
+
+@app.patch("/admin/api/scores/{session_id}", dependencies=[Depends(require_admin)])
+async def admin_update_score(session_id: str, update: AdminScoreUpdate):
+    """Edit a score's nickname, company or email"""
+    try:
+        updated = await database.admin_update_score(
+            session_id,
+            update.nickname,
+            update.company,
+            str(update.email) if update.email else None,
+        )
+
+        if not updated:
+            raise HTTPException(status_code=404, detail="Score not found")
+
+        logger.info(f"Admin updated score {session_id}")
+        return {"success": True}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating score {session_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update score")
+
+
+@app.delete("/admin/api/scores/{session_id}", dependencies=[Depends(require_admin)])
+async def admin_delete_score(session_id: str):
+    """Delete a score - for clearing out test runs and junk entries"""
+    try:
+        deleted = await database.admin_delete_score(session_id)
+
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Score not found")
+
+        logger.info(f"Admin deleted score {session_id}")
+        return {"success": True}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting score {session_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete score")
+
+
+@app.get("/admin/export.csv", dependencies=[Depends(require_admin)])
+async def admin_export_csv(claimed_only: bool = False):
+    """Download every score as CSV, for spreadsheets and follow-up"""
+    try:
+        rows = await database.get_all_scores_admin()
+
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(
+            [
+                "rank",
+                "nickname",
+                "company",
+                "email",
+                "total_savings",
+                "final_bill",
+                "claimed",
+                "played_at",
+                "claimed_at",
+                "session_id",
+            ]
+        )
+
+        exported = 0
+        for index, row in enumerate(rows):
+            if claimed_only and not row["email"]:
+                continue
+
+            writer.writerow(
+                [
+                    index + 1,
+                    row["nickname"] or "",
+                    row["company"] or "",
+                    row["email"] or "",
+                    row["total_savings"],
+                    row["final_bill"],
+                    "yes" if row["email"] else "no",
+                    row["timestamp"].isoformat() if row["timestamp"] else "",
+                    row["claimed_at"].isoformat() if row["claimed_at"] else "",
+                    row["session_id"],
+                ]
+            )
+            exported += 1
+
+        filename = f"inkless-scores-{datetime.utcnow().strftime('%Y-%m-%d')}.csv"
+        logger.info(f"Admin exported {exported} scores as CSV")
+
+        return Response(
+            content=buffer.getvalue(),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    except Exception as e:
+        logger.error(f"Error exporting scores: {e}")
+        raise HTTPException(status_code=500, detail="Failed to export scores")
+
 
 @app.get("/api/admin/emails")
 async def get_emails(admin_key: str = None):
