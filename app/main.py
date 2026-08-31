@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from datetime import datetime
@@ -43,6 +43,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Static game build (the arcade frontend).
+#
+# `docs/` is the canonical build directory: `npm run build` writes docs/game.js
+# into it and rollup's dev server uses it as its contentBase. Mounting it here
+# means the game and the score API share an origin, so the arcade build needs
+# neither CORS nor a hardcoded API host.
+GAME_STATIC_DIR = os.getenv(
+    "GAME_STATIC_DIR",
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "docs",
+    ),
+)
+
+if os.path.isdir(GAME_STATIC_DIR):
+    # html=True serves index.html for /game/, and Starlette redirects /game to
+    # /game/ so the game's relative asset paths resolve inside /game/ rather
+    # than against the site root.
+    app.mount("/game", StaticFiles(directory=GAME_STATIC_DIR, html=True), name="game")
+    logger.info(f"Serving game build from {GAME_STATIC_DIR} at /game")
+else:
+    logger.warning(f"No game build at {GAME_STATIC_DIR}; /game will return 404")
+
 def format_money(amount: int) -> str:
     """Format money display"""
     if amount >= 1000:
@@ -52,7 +75,21 @@ def format_money(amount: int) -> str:
 @app.get("/")
 async def root():
     """API health check"""
-    return {"message": "Inkless Game Score API", "status": "healthy"}
+    return {
+        "message": "Inkless Game Score API",
+        "status": "healthy",
+        "game": "/game/",
+        "leaderboard": "/leaderboard",
+    }
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    """Serve the game's favicon at the site root"""
+    icon_path = os.path.join(GAME_STATIC_DIR, "favicon.ico")
+    if os.path.isfile(icon_path):
+        return FileResponse(icon_path)
+    raise HTTPException(status_code=404, detail="Not found")
 
 @app.post("/api/scores", response_model=ScoreResponse)
 async def submit_score(score: ScoreSubmission):
