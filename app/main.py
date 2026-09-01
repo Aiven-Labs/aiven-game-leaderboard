@@ -70,11 +70,38 @@ GAME_STATIC_DIR = os.getenv(
     ),
 )
 
+class GameStaticFiles(StaticFiles):
+    """StaticFiles that stops browsers serving a stale game after a deploy.
+
+    Starlette sends only last-modified and etag, with no Cache-Control. Browsers
+    then apply heuristic freshness and can keep a cached game.js for a long time
+    without revalidating - so a deployed change silently fails to reach the
+    arcade cabinet and anyone who has played before.
+
+    index.html, game.js and game.config.js change on every deploy, so they are
+    marked no-cache: the browser must revalidate, and the etag makes that a cheap
+    304 when nothing changed. Assets keep a normal cache lifetime; they are large
+    and effectively immutable.
+    """
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+
+        content_type = response.headers.get("content-type", "")
+        revalidate = path.endswith((".html", ".js")) or content_type.startswith("text/html")
+
+        response.headers["Cache-Control"] = (
+            "no-cache" if revalidate else "public, max-age=86400"
+        )
+
+        return response
+
+
 if os.path.isdir(GAME_STATIC_DIR):
     # html=True serves index.html for /game/, and Starlette redirects /game to
     # /game/ so the game's relative asset paths resolve inside /game/ rather
     # than against the site root.
-    app.mount("/game", StaticFiles(directory=GAME_STATIC_DIR, html=True), name="game")
+    app.mount("/game", GameStaticFiles(directory=GAME_STATIC_DIR, html=True), name="game")
     logger.info(f"Serving game build from {GAME_STATIC_DIR} at /game")
 else:
     logger.warning(f"No game build at {GAME_STATIC_DIR}; /game will return 404")
