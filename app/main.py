@@ -179,6 +179,27 @@ async def check_high_score(session_id: str):
         logger.error(f"Error checking high score: {e}")
         raise HTTPException(status_code=500, detail="Failed to check high score")
 
+@app.get("/api/scores/{session_id}/status")
+async def score_status(session_id: str):
+    """Lightweight poll target for the arcade cabinet: has this score been claimed yet?
+
+    The cabinet leaves the QR code and claim button up until the score is claimed (or it
+    times out), polling this rather than a fixed on-screen timer, so it doesn't take the QR
+    code away before someone's had a chance to scan it.
+    """
+    try:
+        row = await database.get_score(session_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        return {"claimed": row["claimed_at"] is not None}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error checking score status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to check score status")
+
 @app.get("/claim/{session_id}", response_class=HTMLResponse)
 async def claim_page(session_id: str, request: Request):
     """Display the claim page for a session"""
