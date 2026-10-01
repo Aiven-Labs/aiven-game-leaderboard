@@ -102,7 +102,11 @@ if os.path.isdir(GAME_STATIC_DIR):
     # /game/ so the game's relative asset paths resolve inside /game/ rather
     # than against the site root.
     app.mount("/game", GameStaticFiles(directory=GAME_STATIC_DIR, html=True), name="game")
-    logger.info(f"Serving game build from {GAME_STATIC_DIR} at /game")
+    # The same build is also served at /qrcode/ for the arcade cabinet. The bundle picks its
+    # end-of-game flow from the URL it is loaded at: /game/ shows an on-screen sign-up form,
+    # /qrcode/ shows a QR code that stays up until the score is scanned.
+    app.mount("/qrcode", GameStaticFiles(directory=GAME_STATIC_DIR, html=True), name="qrcode")
+    logger.info(f"Serving game build from {GAME_STATIC_DIR} at /game and /qrcode")
 else:
     logger.warning(f"No game build at {GAME_STATIC_DIR}; /game will return 404")
 
@@ -119,6 +123,7 @@ async def root():
         "message": "Inkless Game Score API",
         "status": "healthy",
         "game": "/game/",
+        "arcade": "/qrcode/",
         "leaderboard": "/leaderboard",
     }
 
@@ -578,6 +583,28 @@ async def claim_page(session_id: str, request: Request):
                         color: #666666;
                     }}
                     
+                    .consent-label {{
+                        display: flex;
+                        align-items: flex-start;
+                        gap: 12px;
+                        cursor: pointer;
+                    }}
+
+                    .consent-label input[type="checkbox"] {{
+                        width: 22px;
+                        height: 22px;
+                        min-width: 22px;
+                        margin: 2px 0 0 0;
+                        padding: 0;
+                        accent-color: #FF6B35;
+                        cursor: pointer;
+                    }}
+
+                    .consent-label a {{
+                        color: #FF6B35;
+                        word-break: break-all;
+                    }}
+
                     .consent-text {{
                         background: #1a1a1a;
                         border-left: 3px solid #FF6B35;
@@ -742,9 +769,12 @@ async def claim_page(session_id: str, request: Request):
                             <small class="optional">Company and title fields are optional</small>
                             
                             <div class="consent-text">
-                                By submitting, you agree to receive updates about Aiven Inkless and similar product releases.
+                                <label class="consent-label">
+                                    <input type="checkbox" id="privacyConsent" name="privacyConsent" required>
+                                    <span>By submitting your information, you agree to Aiven's privacy policy: <a href="https://aiven.io/privacy" target="_blank" rel="noopener noreferrer">https://aiven.io/privacy</a></span>
+                                </label>
                             </div>
-                            
+
                             <button type="submit" id="submitBtn">
                                 <span class="loading">⏳ Claiming...</span>
                                 <span class="normal">Claim Score</span>
@@ -774,6 +804,10 @@ async def claim_page(session_id: str, request: Request):
 
                 document.getElementById('claimForm').addEventListener('submit', async (e) => {{
                     e.preventDefault();
+                    if (!document.getElementById('privacyConsent').checked) {{
+                        document.getElementById('message').innerHTML = '<div class="error">❌ Please agree to the privacy policy to continue.</div>';
+                        return;
+                    }}
                     const email = document.getElementById('email').value;
                     const nickname = document.getElementById('nickname').value;
                     const company = document.getElementById('company').value || null;
