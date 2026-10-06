@@ -200,6 +200,7 @@
                             <th style="text-align:right">Savings</th>
                             <th style="text-align:right">Final bill</th>
                             <th>Status</th>
+                            <th>Source</th>
                             <th style="text-align:right">Played</th>
                             <th class="actions">Actions</th>
                         </tr>
@@ -261,7 +262,9 @@
                         <td class="savings">${money(score.total_savings)}</td>
                         <td class="bill">${money(score.final_bill)}</td>
                         <td><span class="pill ${score.claimed ? 'claimed' : 'unclaimed'}">${score.claimed ? 'claimed' : 'unclaimed'}</span></td>
-                        <td class="date">${shortDate(score.played_at)}</td>
+                        <td class="company">${escapeHtml(score.source)}</td>
+                        <td class="company">${escapeHtml(score.source)}</td>
+                    <td class="date">${shortDate(score.played_at)}</td>
                         <td class="actions">
                             <button data-action="save">Save</button>
                             <button class="secondary" data-action="cancel">Cancel</button>

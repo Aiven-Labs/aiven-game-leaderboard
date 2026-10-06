@@ -88,6 +88,12 @@ class Database:
                 except Exception as e2:
                     logger.warning(f"Could not add company column: {e2}")
             
+            # Where the score was played: 'arcade' (the cabinet) or 'web'. Every score
+            # that existed before this column came from the arcade, hence the default.
+            await conn.execute("""
+                ALTER TABLE scores ADD COLUMN IF NOT EXISTS source VARCHAR(10) NOT NULL DEFAULT 'arcade';
+            """)
+
             # Create indexes for better performance
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_session_id ON scores(session_id);
@@ -108,7 +114,7 @@ class Database:
             
         logger.info("Database tables created/verified")
 
-    async def submit_score(self, session_id: str, final_bill: int, total_savings: int, timestamp: str):
+    async def submit_score(self, session_id: str, final_bill: int, total_savings: int, timestamp: str, source: str = 'arcade'):
         """Submit a new score to the database"""
         async with self.pool.acquire() as conn:
             # For simplicity, just use current UTC time
@@ -116,9 +122,9 @@ class Database:
             dt = datetime.utcnow()
             
             await conn.execute("""
-                INSERT INTO scores (session_id, final_bill, total_savings, timestamp)
-                VALUES ($1, $2, $3, $4)
-            """, session_id, final_bill, total_savings, dt)
+                INSERT INTO scores (session_id, final_bill, total_savings, timestamp, source)
+                VALUES ($1, $2, $3, $4, $5)
+            """, session_id, final_bill, total_savings, dt, source)
 
     async def get_score(self, session_id: str):
         """Get a score by session ID"""
@@ -223,7 +229,7 @@ class Database:
                 'total_scores': total
             }
 
-    async def get_leaderboard(self, limit: int = None):
+    async def get_leaderboard(self, limit: int = None, source: str = None):
         """Get all scores for leaderboard (claimed and unclaimed)"""
         async with self.pool.acquire() as conn:
             # Check if nickname and company columns exist first
@@ -245,7 +251,8 @@ class Database:
                     "total_savings",
                     "email",
                     "timestamp",
-                    "claimed_at"
+                    "claimed_at",
+                    "source"
                 ]
                 
                 if nickname_exists:
@@ -255,18 +262,20 @@ class Database:
                 
                 select_clause = ", ".join(select_fields)
                 
+                where = "WHERE source = $1" if source else ""
                 query = f"""
                     SELECT 
                         {select_clause},
                         ROW_NUMBER() OVER (ORDER BY total_savings DESC) as rank
                     FROM scores
+                    {where}
                     ORDER BY total_savings DESC
                 """
                 
                 if limit:
-                    query += f" LIMIT {limit}"
+                    query += f" LIMIT {int(limit)}"
                     
-                rows = await conn.fetch(query)
+                rows = await conn.fetch(query, source) if source else await conn.fetch(query)
                 
                 # Convert to list of dictionaries and ensure all expected fields exist
                 result = []
@@ -322,7 +331,8 @@ class Database:
                     nickname,
                     company,
                     claimed_at,
-                    created_at
+                    created_at,
+                    source
                 FROM scores
                 ORDER BY total_savings DESC
             """)

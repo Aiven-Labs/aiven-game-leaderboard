@@ -8,6 +8,7 @@ import csv
 import hashlib
 import hmac
 import io
+import json
 import logging
 import os
 import time
@@ -97,6 +98,28 @@ class GameStaticFiles(StaticFiles):
         return response
 
 
+def _write_stdb_config() -> None:
+    """Point the game client at the SpacetimeDB server named by the environment.
+
+    Same job as the nginx image's entrypoint: the client loads stdb-config.js
+    before its own config, so the address is a deploy setting, not baked into
+    the bundle.
+    """
+    uri = os.getenv("STDB_URI", "").strip()
+    if not uri or not os.path.isdir(GAME_STATIC_DIR):
+        return
+    db_name = os.getenv("STDB_DATABASE", "inkless-game").strip() or "inkless-game"
+    try:
+        with open(os.path.join(GAME_STATIC_DIR, "stdb-config.js"), "w") as f:
+            f.write(f"window.INKLESS_STDB_URI = {json.dumps(uri)};\n")
+            f.write(f"window.INKLESS_STDB_DATABASE = {json.dumps(db_name)};\n")
+        logger.info(f"Game client will connect to {uri} ({db_name})")
+    except OSError as e:
+        logger.warning(f"Could not write stdb-config.js: {e}")
+
+
+_write_stdb_config()
+
 if os.path.isdir(GAME_STATIC_DIR):
     # html=True serves index.html for /game/, and Starlette redirects /game to
     # /game/ so the game's relative asset paths resolve inside /game/ rather
@@ -161,7 +184,8 @@ async def submit_score(score: ScoreSubmission, x_ingest_secret: str | None = Hea
             score.session_id, 
             score.final_bill, 
             score.total_savings, 
-            score.timestamp
+            score.timestamp,
+            score.source
         )
         
         logger.info(f"Score submitted for session {score.session_id}: bill=${score.final_bill}, savings=${score.total_savings}")
@@ -995,11 +1019,16 @@ async def claim_score(session_id: str, claim_data: ClaimData):
         raise HTTPException(status_code=500, detail="Failed to claim score")
 
 @app.get("/api/leaderboard")
-async def get_leaderboard(limit: int = 10):
-    """Get the leaderboard showing only claimed scores with nicknames"""
+async def get_leaderboard(limit: int = 10, source: str = "all"):
+    """Get the leaderboard showing only claimed scores with nicknames.
+
+    `source` filters by where the score was played: "arcade", "web" or "all".
+    """
+    if source not in ("all", "arcade", "web"):
+        raise HTTPException(status_code=400, detail="source must be all, arcade or web")
     try:
-        logger.info("Getting leaderboard")
-        all_scores = await database.get_leaderboard()
+        logger.info(f"Getting leaderboard (source={source})")
+        all_scores = await database.get_leaderboard(source=None if source == "all" else source)
         
         # Filter to only include claimed scores (those with nicknames and emails)
         claimed_scores = []
@@ -1027,6 +1056,7 @@ async def get_leaderboard(limit: int = 10):
                 "final_bill": format_money(score['final_bill']),
                 "nickname": score.get('nickname', 'Anonymous'),
                 "timestamp": score['timestamp'].isoformat(),
+                "source": score.get('source', 'arcade'),
                 "claimed": True  # All these are claimed by definition
             }
             
@@ -1038,7 +1068,7 @@ async def get_leaderboard(limit: int = 10):
             leaderboard.append(entry)
         
         logger.info(f"Returning {len(leaderboard)} claimed scores for leaderboard")
-        return {"leaderboard": leaderboard, "ranked_by": "total_savings"}
+        return {"leaderboard": leaderboard, "ranked_by": "total_savings", "source": source}
         
     except Exception as e:
         logger.error(f"Error getting leaderboard: {e}")
@@ -1196,6 +1226,7 @@ async def admin_list_scores():
                     "total_savings": row["total_savings"],
                     "final_bill": row["final_bill"],
                     "claimed": bool(row["email"]),
+                    "source": row["source"],
                     "played_at": row["timestamp"].isoformat() if row["timestamp"] else None,
                     "claimed_at": row["claimed_at"].isoformat() if row["claimed_at"] else None,
                 }
@@ -1268,6 +1299,7 @@ async def admin_export_csv(claimed_only: bool = False):
                 "total_savings",
                 "final_bill",
                 "claimed",
+                "source",
                 "played_at",
                 "claimed_at",
                 "session_id",
@@ -1288,6 +1320,7 @@ async def admin_export_csv(claimed_only: bool = False):
                     row["total_savings"],
                     row["final_bill"],
                     "yes" if row["email"] else "no",
+                    row["source"],
                     row["timestamp"].isoformat() if row["timestamp"] else "",
                     row["claimed_at"].isoformat() if row["claimed_at"] else "",
                     row["session_id"],

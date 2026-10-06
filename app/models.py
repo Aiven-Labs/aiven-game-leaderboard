@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr, validator
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 import re
 
 class ScoreSubmission(BaseModel):
@@ -8,6 +8,8 @@ class ScoreSubmission(BaseModel):
     final_bill: int
     total_savings: int
     timestamp: str
+    # Older clients do not send this; every score they produced came from the arcade
+    source: Literal['arcade', 'web'] = 'arcade'
 
 class ClaimData(BaseModel):
     email: EmailStr

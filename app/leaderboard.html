@@ -221,6 +221,29 @@
                 font-size: 1em;
             }
         }
+
+        .filters {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            margin: 0 0 18px;
+        }
+        .filter-btn {
+            background: #1a1a1a;
+            color: #cccccc;
+            border: 1px solid #444444;
+            border-radius: 999px;
+            padding: 8px 18px;
+            font-size: 14px;
+            font-family: inherit;
+            cursor: pointer;
+        }
+        .filter-btn.active {
+            background: #FF6B35;
+            border-color: #FF6B35;
+            color: #000000;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -230,6 +253,12 @@
             <p>Top players who saved the most on their Kafka bills!</p>
         </div>
         
+        <div class="filters" role="group" aria-label="Filter scores by where they were played">
+            <button class="filter-btn" data-source="all" onclick="setSource('all')">All</button>
+            <button class="filter-btn" data-source="arcade" onclick="setSource('arcade')">Arcade</button>
+            <button class="filter-btn" data-source="web" onclick="setSource('web')">Web</button>
+        </div>
+
         <div class="leaderboard">
             <div id="loading" class="loading">
                 Loading leaderboard...
@@ -288,7 +317,34 @@
             return `#${rank}`;
         }
 
+        // Which scores to show: all, arcade (the cabinet) or web. The embedding page can
+        // preselect with ?source=arcade; otherwise the last choice is remembered.
+        const SOURCES = ['all', 'arcade', 'web'];
+        let currentSource = (function () {
+            const fromUrl = new URLSearchParams(window.location.search).get('source');
+            if (SOURCES.indexOf(fromUrl) !== -1) return fromUrl;
+            try {
+                const saved = window.localStorage.getItem('leaderboardSource');
+                if (SOURCES.indexOf(saved) !== -1) return saved;
+            } catch (e) { /* storage unavailable */ }
+            return 'all';
+        })();
+
+        function updateFilterButtons() {
+            document.querySelectorAll('.filter-btn').forEach(function (b) {
+                b.classList.toggle('active', b.dataset.source === currentSource);
+            });
+        }
+
+        function setSource(source) {
+            currentSource = source;
+            try { window.localStorage.setItem('leaderboardSource', source); } catch (e) { /* ignore */ }
+            updateFilterButtons();
+            loadLeaderboard();
+        }
+
         async function loadLeaderboard() {
+            updateFilterButtons();
             const loading = document.getElementById('loading');
             const content = document.getElementById('content');
             const error = document.getElementById('error');
@@ -300,7 +356,7 @@
             error.style.display = 'none';
 
             try {
-                const response = await fetch(`${API_BASE_URL}/api/leaderboard?limit=20`);
+                const response = await fetch(`${API_BASE_URL}/api/leaderboard?limit=20&source=${currentSource}`);
                 
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -309,7 +365,7 @@
                 const data = await response.json();
                 
                 if (!data.leaderboard || data.leaderboard.length === 0) {
-                    leaderboardData.innerHTML = '<div class="no-scores">No scores claimed yet. Be the first!</div>';
+                    leaderboardData.innerHTML = '<div class="no-scores">No scores claimed yet' + (currentSource === 'all' ? '' : ' for ' + currentSource) + '. Be the first!</div>';
                 } else {
                     leaderboardData.innerHTML = data.leaderboard.map(score => `
                         <div class="leaderboard-row">
