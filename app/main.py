@@ -1,4 +1,4 @@
-from fastapi import Depends, FastAPI, Form, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, Form, Header, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -136,9 +136,24 @@ async def favicon():
         return FileResponse(icon_path)
     raise HTTPException(status_code=404, detail="Not found")
 
+def _check_ingest_secret(provided: str | None) -> None:
+    """Only the game server may create scores once INGEST_SECRET is configured.
+
+    With the SpacetimeDB build the score is computed server-side and posted here by
+    the module, so a client must not be able to POST its own. Unset keeps the
+    legacy behaviour (anyone can submit) for the old client-side build.
+    """
+    expected = os.getenv("INGEST_SECRET")
+    if not expected:
+        return
+    if not provided or not hmac.compare_digest(provided.encode(), expected.encode()):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+
 @app.post("/api/scores", response_model=ScoreResponse)
-async def submit_score(score: ScoreSubmission):
+async def submit_score(score: ScoreSubmission, x_ingest_secret: str | None = Header(default=None)):
     """Submit a game score"""
+    _check_ingest_secret(x_ingest_secret)
     try:
         logger.info(f"Attempting to submit score: {score}")
         
