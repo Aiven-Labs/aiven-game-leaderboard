@@ -5,8 +5,9 @@ a developer or a deploy to set one up.
 
 ## Set up a new event (2 minutes)
 
-1. Open the score server's **`/admin`** page and sign in.
-2. Scroll to **Events**. Fill in:
+1. Open the score server's **`/admin`** page and sign in, then click the **Events** tab
+   (or go straight to **`/admin#events`**).
+2. Fill in the form at the top:
    - **slug**: a short lowercase id with hyphens and a year, e.g. `kafka-summit-2027`
      (it appears in links, so keep it tidy; the year stops next year's event mixing in)
    - **name**: what players see, e.g. "Kafka Summit 2027"
@@ -25,7 +26,7 @@ a developer or a deploy to set one up.
 ## During and after the event
 
 - The **leaderboard page** has an event picker; `…/leaderboard?event=<slug>` links straight to one board.
-- In `/admin`, use the **event filter** to see just that event's entrants. **Export CSV** and
+- In `/admin`, on the **Scores** tab, use the **event filter** to see just that event's entrants. **Export CSV** and
   **Export claimed only** follow the filter, so the prize draw uses that event's list only.
 - Junk or test entries: **Edit** or delete them in the table before drawing.
 

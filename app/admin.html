@@ -158,6 +158,39 @@
         .gate-card button { width: 100%; }
         .gate-error { color: #FF6B6B; font-size: 0.9em; margin-top: 12px; min-height: 1.4em; }
 
+        select, input[type="datetime-local"] {
+            background: #1a1a1a;
+            border: 1px solid #333333;
+            border-radius: 6px;
+            color: #ffffff;
+            padding: 9px 12px;
+            font-size: 0.95em;
+            font-family: inherit;
+            color-scheme: dark;
+        }
+        select:focus, input[type="datetime-local"]:focus { outline: 2px solid #FF6B35; outline-offset: -1px; }
+        .qr-item a { color: #FF6B35; text-decoration: none; font-weight: 600; }
+        .qr-item a:hover { text-decoration: underline; }
+        .tabs { display: flex; align-items: flex-end; gap: 4px; margin: 18px 0 0; border-bottom: 1px solid #333333; }
+        .tabs .tab {
+            background: transparent;
+            color: #bbbbbb;
+            border: none;
+            border-bottom: 3px solid transparent;
+            border-radius: 6px 6px 0 0;
+            padding: 10px 18px;
+            font-size: 1em;
+            font-weight: 600;
+            margin-bottom: -1px;
+        }
+        .tabs .tab:hover { color: #ffffff; background: #1a1a1a; }
+        .tabs .tab.active { color: #ffffff; border-bottom-color: #FF6B35; }
+        .tabs .count { margin-left: 6px; padding: 1px 8px; border-radius: 999px; background: #2a2a2a; color: #cccccc; font-size: 0.8em; font-weight: 600; }
+        .tabs .tab.active .count { background: #FF6B35; color: #000000; }
+        .tabs-spacer { flex: 1; }
+        .tabs > button.secondary { margin-bottom: 6px; }
+        .tab-intro { margin: 20px 0 6px; max-width: 900px; line-height: 1.5; }
+
         .hidden { display: none !important; }
         .link-buttons button { display: block; margin: 0 0 6px; width: 100%; text-align: left; }
         .qr-cell { white-space: nowrap; }
@@ -181,21 +214,28 @@
         <!-- Console -->
         <div id="console" class="hidden">
             <div class="header">
-                <h1>Score admin</h1>
+                <h1>Disk Invaders admin</h1>
                 <span class="muted" id="summary"></span>
             </div>
 
-            <div class="toolbar">
-                <input type="text" id="search" placeholder="Filter by nickname, company or email…">
-                <select id="event-filter" title="Show one event's scores; exports follow this too">
-                    <option value="all">All events</option>
-                    <option value="none">No event</option>
-                </select>
-                <button id="export-all">Export CSV</button>
-                <button class="secondary" id="export-claimed">Export claimed only</button>
-                <button class="secondary" id="refresh">Refresh</button>
+            <nav class="tabs" role="tablist" aria-label="Admin sections">
+                <button class="tab" role="tab" id="tab-btn-scores" data-tab="scores" aria-controls="tab-scores">Scores <span class="count" id="count-scores"></span></button>
+                <button class="tab" role="tab" id="tab-btn-events" data-tab="events" aria-controls="tab-events">Events <span class="count" id="count-events"></span></button>
+                <span class="tabs-spacer"></span>
                 <button class="secondary" id="logout">Sign out</button>
-            </div>
+            </nav>
+
+            <section id="tab-scores" role="tabpanel" aria-labelledby="tab-btn-scores">
+                <div class="toolbar">
+                    <input type="text" id="search" placeholder="Filter by nickname, company or email…">
+                    <select id="event-filter" title="Show one event's scores; exports follow this too">
+                        <option value="all">All events</option>
+                        <option value="none">No event</option>
+                    </select>
+                    <button id="export-all">Export CSV</button>
+                    <button class="secondary" id="export-claimed">Export claimed only</button>
+                    <button class="secondary" id="refresh">Refresh</button>
+                </div>
 
             <div class="table-wrap">
                 <table>
@@ -218,25 +258,27 @@
                 </table>
                 <div class="message hidden" id="table-message"></div>
             </div>
+            </section>
 
-            <div class="header" style="margin-top:28px">
-                <h1 style="font-size:1.1em">Events</h1>
-                <span class="muted"><strong>To add an event:</strong> fill in the form below and save. Its game link, leaderboard link, arcade-cabinet URL and QR codes appear in the table, ready to paste into slides or posters. Each event keeps its own leaderboard, so events can run on the same dates. Times are UTC; leave them blank for always open.</span>
-            </div>
-            <div class="table-wrap">
-                <table>
-                    <thead><tr><th>Event</th><th>Window (UTC)</th><th>Status</th><th>Links (click to copy)</th><th>QR codes</th><th></th></tr></thead>
-                    <tbody id="event-rows"></tbody>
-                </table>
-            </div>
-            <form id="event-form" class="toolbar" style="margin-top:12px">
+            <section id="tab-events" role="tabpanel" aria-labelledby="tab-btn-events" class="hidden">
+                <p class="muted tab-intro"><strong>To add an event:</strong> fill in the form and save. Its game link, leaderboard link, arcade-cabinet URL and QR codes appear in the table, ready to paste into slides or posters. Each event keeps its own leaderboard, so events can run on the same dates. Times are UTC; leave them blank for always open.</p>
+
+            <form id="event-form" class="toolbar" style="margin:0 0 8px">
                 <input type="text" id="ev-slug" placeholder="slug, e.g. pgconf-2026" pattern="[a-z0-9][a-z0-9-]{0,39}" required>
                 <input type="text" id="ev-name" placeholder="Display name" maxlength="100" required>
                 <input type="datetime-local" id="ev-start" title="Opens (UTC)">
                 <input type="datetime-local" id="ev-end" title="Closes (UTC)">
                 <button type="submit">Save event</button>
             </form>
-            <div class="message hidden" id="event-message"></div>
+                <div class="message hidden" id="event-message"></div>
+
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Event</th><th>Window (UTC)</th><th>Status</th><th>Links (click to copy)</th><th>QR codes</th><th></th></tr></thead>
+                    <tbody id="event-rows"></tbody>
+                </table>
+            </div>
+            </section>
         </div>
     </div>
 
@@ -291,10 +333,8 @@
                         <td class="bill">${money(score.final_bill)}</td>
                         <td><span class="pill ${score.claimed ? 'claimed' : 'unclaimed'}">${score.claimed ? 'claimed' : 'unclaimed'}</span></td>
                         <td class="company">${escapeHtml(score.source)}</td>
-                        <td class="company">${escapeHtml(score.event)}</td>
-                        <td class="company">${escapeHtml(score.source)}</td>
-                    <td class="company">${escapeHtml(score.event) || '—'}</td>
-                    <td class="date">${shortDate(score.played_at)}</td>
+                        <td class="company">${escapeHtml(score.event) || '—'}</td>
+                        <td class="date">${shortDate(score.played_at)}</td>
                         <td class="actions">
                             <button data-action="save">Save</button>
                             <button class="secondary" data-action="cancel">Cancel</button>
@@ -311,6 +351,8 @@
                     <td class="savings">${money(score.total_savings)}</td>
                     <td class="bill">${money(score.final_bill)}</td>
                     <td><span class="pill ${score.claimed ? 'claimed' : 'unclaimed'}">${score.claimed ? 'claimed' : 'unclaimed'}</span></td>
+                    <td class="company">${escapeHtml(score.source)}</td>
+                    <td class="company">${escapeHtml(score.event) || '—'}</td>
                     <td class="date">${shortDate(score.played_at)}</td>
                     <td class="actions">
                         <button class="secondary" data-action="edit">Edit</button>
@@ -339,6 +381,7 @@
             }
 
             const claimed = scores.filter((s) => s.claimed).length;
+            el('count-scores').textContent = scores.length;
             el('summary').textContent =
                 `${scores.length} scores · ${claimed} claimed` +
                 ((term || ev !== 'all') ? ` · showing ${visible.length}` : '');
@@ -489,6 +532,28 @@
             showGate('Signed out');
         });
 
+        // ---- tabs ----
+        const TABS = ['scores', 'events'];
+
+        function showTab(name, updateUrl = true) {
+            if (!TABS.includes(name)) name = 'scores';
+            TABS.forEach((t) => {
+                el('tab-' + t).classList.toggle('hidden', t !== name);
+                const btn = el('tab-btn-' + t);
+                btn.classList.toggle('active', t === name);
+                btn.setAttribute('aria-selected', t === name ? 'true' : 'false');
+            });
+            // The score counts only make sense next to the scores
+            el('summary').classList.toggle('hidden', name !== 'scores');
+            if (updateUrl) window.history.replaceState(null, '', name === 'scores' ? window.location.pathname : '#' + name);
+        }
+
+        document.querySelectorAll('.tabs .tab').forEach((btn) => {
+            btn.addEventListener('click', () => showTab(btn.getAttribute('data-tab')));
+        });
+        window.addEventListener('hashchange', () => showTab(window.location.hash.slice(1), false));
+        showTab(window.location.hash.slice(1), false);
+
         // ---- events ----
         let events = [];
 
@@ -521,6 +586,7 @@
                     <td class="actions"><button class="secondary" data-edit="${escapeHtml(e.slug)}">Edit</button></td>
                 </tr>`).join('') || '<tr><td colspan="6" class="muted">No events yet.</td></tr>';
 
+            el('count-events').textContent = events.length;
             const filter = el('event-filter');
             const keep = filter.value;
             filter.innerHTML = '<option value="all">All events</option><option value="none">No event</option>'
