@@ -2,12 +2,15 @@ from fastapi import Depends, FastAPI, Form, Header, HTTPException, Request, Resp
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+import asyncpg
 import segno
 from datetime import datetime, timezone
 import asyncio
 import csv
 import hashlib
 import hmac
+import html
+import secrets
 import io
 import json
 import logging
@@ -19,7 +22,10 @@ from contextlib import asynccontextmanager
 from .database import database
 from .models import (
     EventUpsert,
+    GameUpsert,
     ScoreSubmission,
+    ScoreV1,
+    TokenCreate,
     ClaimData,
     ScoreResponse,
     HighScoreCheck,
@@ -141,6 +147,54 @@ def format_money(amount: int) -> str:
     if amount >= 1000:
         return f"${amount/1000:.1f}k"
     return f"${amount}"
+
+
+def format_value(fmt, amount):
+    """Show a score the way its game defines: int (1,234), money ($1.2k) or time_ms (1:02.345)"""
+    if amount is None:
+        return None
+    if fmt == "money":
+        return format_money(amount)
+    if fmt == "time_ms":
+        minutes, rest = divmod(int(amount), 60000)
+        return f"{minutes}:{rest / 1000:06.3f}"
+    return f"{int(amount):,}"
+
+
+DEFAULT_GAME = "disk-invaders"
+
+
+def _json_or_none(value):
+    """asyncpg hands jsonb back as text"""
+    if value is None or isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _game_public(game: dict) -> dict:
+    return {
+        "slug": game["slug"], "name": game["name"],
+        "score_label": game["score_label"], "score_format": game["score_format"],
+        "sort_order": game["sort_order"],
+        "secondary_label": game["secondary_label"], "secondary_format": game["secondary_format"],
+        "highscore_text": game["highscore_text"],
+    }
+
+
+async def _games_by_slug() -> dict:
+    return {g["slug"]: g for g in await database.list_games()}
+
+
+def _displays(row: dict, game: dict | None):
+    """(score, secondary) formatted for a row, using its game's formats"""
+    game = game or {"score_format": "int", "secondary_format": "int", "secondary_label": None}
+    score = format_value(game["score_format"], row["score"])
+    has_secondary = row.get("secondary") is not None and game.get("secondary_label")
+    secondary = format_value(game.get("secondary_format") or "int", row["secondary"]) if has_secondary else None
+    return score, secondary
 
 @app.get("/")
 async def root():
@@ -454,8 +508,24 @@ async def claim_page(session_id: str, request: Request):
                 </html>
             """, status_code=404)
         
-        final_bill_formatted = format_money(row['final_bill'])
-        total_savings_formatted = format_money(row['total_savings'])
+        game_cfg = await database.get_game(row['game'])
+        score_display, secondary_display = _displays(dict(row), game_cfg)
+        score_label = html.escape(game_cfg['score_label'] if game_cfg else 'Score')
+        secondary_label = html.escape((game_cfg or {}).get('secondary_label') or '')
+        # The score lines shown on the "already claimed" and "claim" pages
+        score_block = f"<strong>{score_label}:</strong> {score_display}"
+        if secondary_display is not None:
+            score_block += f"<br><strong>{secondary_label}:</strong> {secondary_display}"
+        score_block_form = (
+            f'<div><strong>{score_label}:</strong> <span class="savings-value">{score_display}</span></div>'
+            + (f'<div style="margin-top: 10px;"><strong>{secondary_label}:</strong> <span class="bill-value">{secondary_display}</span></div>'
+               if secondary_display is not None else '')
+        )
+        # Goes inside a JS template literal, so neutralise backticks, backslashes and ${
+        _hs = (game_cfg or {}).get('highscore_text') or 'Your score: {score}'
+        highscore_line = html.escape(_hs.replace('{score}', str(score_display))) \
+            .replace('\\', '\\\\').replace('`', '\\`').replace('${', '\\${')
+        total_savings_formatted = score_display  # kept: used below by older fragments
         
         # If already claimed
         if row['email']:
@@ -478,8 +548,7 @@ async def claim_page(session_id: str, request: Request):
                     <div class="container">
                         <h1>🎉 Score Already Claimed!</h1>
                         <div class="score">
-                            <strong>Final Bill:</strong> {final_bill_formatted}<br>
-                            <strong>Total Saved:</strong> {total_savings_formatted}
+                            {score_block}
                         </div>
                         <div class="claimed">This score was claimed by:<br><strong>"{row['nickname'] or 'Anonymous'}"</strong>{company_display}</div>
                         <div class="meta">
@@ -790,8 +859,7 @@ async def claim_page(session_id: str, request: Request):
                     <h1>🎮 Claim Your Score!</h1>
                     
                     <div class="score">
-                        <div><strong>Total Saved:</strong> <span class="savings-value">{total_savings_formatted}</span></div>
-                        <div style="margin-top: 10px;"><strong>Final Bill:</strong> <span class="bill-value">{final_bill_formatted}</span></div>
+                        {score_block_form}
                     </div>
                     
                     <div class="meta">Game played on: {row['timestamp'].strftime('%B %d, %Y at %I:%M %p')}</div>
@@ -839,7 +907,7 @@ async def claim_page(session_id: str, request: Request):
                     .then(data => {{
                         if (data.is_high_score) {{
                             document.getElementById('highScoreCheck').innerHTML = 
-                                `<div class="high-score">🏆 HIGH SCORE! You saved {total_savings_formatted}!<br>
+                                `<div class="high-score">🏆 HIGH SCORE! {highscore_line}<br>
                                 Rank #${{data.rank}} out of ${{data.total_scores}} players!</div>`;
                         }}
                     }})
@@ -992,7 +1060,7 @@ async def claim_score(session_id: str, claim_data: ClaimData):
             raise HTTPException(status_code=400, detail=f"Score has already been claimed")
         
         # Check if nickname is already taken by a different email
-        existing_user = await database.get_user_by_nickname(claim_data.nickname, score['event'])
+        existing_user = await database.get_user_by_nickname(claim_data.nickname, score['event'], score['game'])
         if existing_user:
             if existing_user['email'].lower() != claim_data.email.lower():
                 raise HTTPException(status_code=400, detail=f"Nickname '{claim_data.nickname}' is already taken. Please choose another.")
@@ -1044,97 +1112,86 @@ async def list_events():
         raise HTTPException(status_code=500, detail="Failed to list events")
 
 
-@app.get("/api/leaderboard")
-async def get_leaderboard(limit: int = 10, source: str = "all", event: str = "all"):
-    """Get the leaderboard showing only claimed scores with nicknames.
+def _leaderboard_entry(rank: int, row: dict, game: dict | None) -> dict:
+    score_display, secondary_display = _displays(row, game)
+    entry = {
+        "rank": rank,
+        "nickname": row.get("nickname") or "Anonymous",
+        "score": row["score"],
+        "score_display": score_display,
+        "secondary": row.get("secondary"),
+        "secondary_display": secondary_display,
+        # Original Disk Invaders field names, so older pages keep working
+        "total_savings": score_display,
+        "final_bill": secondary_display if secondary_display is not None else "—",
+        "timestamp": row["timestamp"].isoformat(),
+        "source": row.get("source", "arcade"),
+        "event": row.get("event"),
+        "claimed": True,  # only claimed scores are ever listed
+    }
+    if row.get("company"):
+        entry["company"] = row["company"]
+    details = _json_or_none(row.get("details"))
+    if details:
+        entry["details"] = details
+    return entry
 
-    `source` filters by where the score was played: "arcade", "web" or "all".
-    `event` picks one event's board by slug, "none" for scores played at no event, or "all".
-    """
-    if source not in ("all", "arcade", "web"):
-        raise HTTPException(status_code=400, detail="source must be all, arcade or web")
+
+async def _build_leaderboard(game_slug: str, limit: int, source: str, event: str) -> dict:
+    if source not in ("all", "arcade", "web", "other"):
+        raise HTTPException(status_code=400, detail="source must be all, arcade, web or other")
     if event not in ("all", "none") and not EVENT_SLUG_RE.match(event):
         raise HTTPException(status_code=400, detail="event must be all, none or an event slug")
+    game = await database.get_game(game_slug)
+    if not game:
+        raise HTTPException(status_code=404, detail="Unknown game")
+
+    rows = await database.get_leaderboard(
+        source=None if source == "all" else source,
+        event=None if event == "all" else event,
+        game=game_slug,
+    )
+    # Only claimed scores (a nickname and an email) are shown; the query already ranks them
+    claimed = [r for r in rows if r.get("nickname") and r.get("email")][:limit]
+    return {
+        "leaderboard": [_leaderboard_entry(i + 1, r, game) for i, r in enumerate(claimed)],
+        "ranked_by": "score",
+        "game": _game_public(game),
+        "source": source,
+        "event": event,
+    }
+
+
+@app.get("/api/leaderboard")
+async def get_leaderboard(limit: int = 10, source: str = "all", event: str = "all", game: str = DEFAULT_GAME):
+    """The leaderboard: claimed scores only, best first.
+
+    `game` picks the game (default Disk Invaders). `source` filters by where it was played
+    ("arcade", "web", "other" or "all"). `event` picks one event's board by slug, "none" for scores
+    played at no event, or "all"."""
     try:
-        logger.info(f"Getting leaderboard (source={source}, event={event})")
-        all_scores = await database.get_leaderboard(
-            source=None if source == "all" else source,
-            event=None if event == "all" else event,
-        )
-        
-        # Filter to only include claimed scores (those with nicknames and emails)
-        claimed_scores = []
-        for score in all_scores:
-            # Only include entries that have been claimed (have nickname and email)
-            # Use .get() to safely access potentially missing fields
-            nickname = score.get('nickname')
-            email = score.get('email')
-            
-            if nickname and email:
-                claimed_scores.append(score)
-        
-        # Sort by total_savings descending (highest savings first)
-        claimed_scores.sort(key=lambda x: x['total_savings'], reverse=True)
-        
-        # Take only the requested limit
-        top_scores = claimed_scores[:limit]
-        
-        # Format the leaderboard response
-        leaderboard = []
-        for i, score in enumerate(top_scores):
-            entry = {
-                "rank": i + 1,
-                "total_savings": format_money(score['total_savings']),
-                "final_bill": format_money(score['final_bill']),
-                "nickname": score.get('nickname', 'Anonymous'),
-                "timestamp": score['timestamp'].isoformat(),
-                "source": score.get('source', 'arcade'),
-                "event": score.get('event'),
-                "claimed": True  # All these are claimed by definition
-            }
-            
-            # Add company if it exists and is not empty
-            company = score.get('company')
-            if company:
-                entry["company"] = company
-            
-            leaderboard.append(entry)
-        
-        logger.info(f"Returning {len(leaderboard)} claimed scores for leaderboard")
-        return {"leaderboard": leaderboard, "ranked_by": "total_savings", "source": source, "event": event}
-        
+        return await _build_leaderboard(game, limit, source, event)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting leaderboard: {e}")
-        logger.error(f"Error type: {type(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to get leaderboard: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get leaderboard")
+
 
 @app.get("/api/all-scores")
-async def get_all_scores():
-    """Get all scores (claimed and unclaimed) for high score detection"""
+async def get_all_scores(game: str = DEFAULT_GAME):
+    """Every score of a game (claimed or not), minimal data, for high score detection"""
     try:
-        logger.info("Getting all scores for high score detection")
-        all_scores = await database.get_leaderboard()
-        
-        # Sort by total_savings descending
-        all_scores.sort(key=lambda x: x['total_savings'], reverse=True)
-        
-        # Add rank to each entry and return minimal data
-        formatted_scores = []
-        for i, score in enumerate(all_scores):
-            formatted_scores.append({
-                'total_savings': score['total_savings'],
-                'final_bill': score['final_bill'],
-                'rank': i + 1,
-                'claimed': bool(score.get('email'))  # True if claimed, False if not
-            })
-        
-        logger.info(f"Returning {len(formatted_scores)} total scores")
-        return formatted_scores
-        
+        rows = await database.get_leaderboard(game=game)
+        return [
+            {"total_savings": r["score"], "final_bill": r["secondary"], "score": r["score"],
+             "rank": i + 1, "claimed": bool(r.get("email"))}
+            for i, r in enumerate(rows)
+        ]
     except Exception as e:
         logger.error(f"Error getting all scores: {e}")
-        logger.error(f"Error type: {type(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to get all scores: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get all scores")
+
 
 # ---------------------------------------------------------------------------
 # Admin console authentication
@@ -1183,10 +1240,40 @@ def _admin_session_valid(token: str) -> bool:
     return hmac.compare_digest(expected, mac)
 
 
-def require_admin(request: Request):
-    """Dependency guarding every admin data route"""
+def require_admin_cookie(request: Request):
+    """Admin console session only. Guards token management: a token must never be able to mint tokens."""
     if not _admin_session_valid(request.cookies.get(ADMIN_SESSION_COOKIE, "")):
         raise HTTPException(status_code=401, detail="Not authenticated")
+
+
+TOKEN_PREFIX = "lbk_"
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _bearer(request: Request) -> str:
+    header = request.headers.get("authorization", "")
+    scheme, _, value = header.partition(" ")
+    return value.strip() if scheme.lower() == "bearer" else ""
+
+
+async def _token_from_request(request: Request):
+    token = _bearer(request)
+    if not token.startswith(TOKEN_PREFIX):
+        return None
+    return await database.authenticate_token(_hash_token(token))
+
+
+async def require_admin(request: Request):
+    """Dependency guarding every admin data route: the console's session cookie, or an admin API token"""
+    if _admin_session_valid(request.cookies.get(ADMIN_SESSION_COOKIE, "")):
+        return
+    tok = await _token_from_request(request)
+    if tok and tok["kind"] == "admin":
+        return
+    raise HTTPException(status_code=401, detail="Not authenticated")
 
 
 @app.post("/admin/login")
@@ -1242,31 +1329,50 @@ async def admin_page():
 
 
 @app.get("/admin/api/scores", dependencies=[Depends(require_admin)])
-async def admin_list_scores():
-    """Every score, all columns, ranked by savings"""
+@app.get("/api/v1/admin/scores", dependencies=[Depends(require_admin)])
+async def admin_list_scores(game: str | None = None, event: str | None = None,
+                            claimed: bool | None = None, limit: int = 5000, offset: int = 0):
+    """Scores of every game (or one with ?game=), ranked within their game. Filters: game, event
+    ("none" = no event), claimed. Paged with limit / offset."""
     try:
-        rows = await database.get_all_scores_admin()
+        games = await _games_by_slug()
+        rows = await database.get_all_scores_admin(game)
 
+        # Rank within each game's own order (the query already sorts by it)
+        position: dict = {}
         scores = []
-        for index, row in enumerate(rows):
-            scores.append(
-                {
-                    "rank": index + 1,
-                    "session_id": row["session_id"],
-                    "nickname": row["nickname"],
-                    "company": row["company"],
-                    "email": row["email"],
-                    "total_savings": row["total_savings"],
-                    "final_bill": row["final_bill"],
-                    "claimed": bool(row["email"]),
-                    "source": row["source"],
-                    "event": row["event"],
-                    "played_at": row["timestamp"].isoformat() if row["timestamp"] else None,
-                    "claimed_at": row["claimed_at"].isoformat() if row["claimed_at"] else None,
-                }
-            )
+        for row in rows:
+            position[row["game"]] = position.get(row["game"], 0) + 1
+            score_display, secondary_display = _displays(row, games.get(row["game"]))
+            scores.append({
+                "rank": position[row["game"]],
+                "session_id": row["session_id"],
+                "game": row["game"],
+                "nickname": row["nickname"],
+                "company": row["company"],
+                "email": row["email"],
+                "score": row["score"],
+                "score_display": score_display,
+                "secondary": row["secondary"],
+                "secondary_display": secondary_display,
+                "details": _json_or_none(row["details"]),
+                "claimed": bool(row["email"]),
+                "source": row["source"],
+                "event": row["event"],
+                "played_at": row["timestamp"].isoformat() if row["timestamp"] else None,
+                "claimed_at": row["claimed_at"].isoformat() if row["claimed_at"] else None,
+            })
 
-        return {"total": len(scores), "scores": scores}
+        if event == "none":
+            scores = [x for x in scores if not x["event"]]
+        elif event:
+            scores = [x for x in scores if x["event"] == event]
+        if claimed is not None:
+            scores = [x for x in scores if x["claimed"] == claimed]
+
+        total = len(scores)
+        limit = max(1, min(limit, 20000))
+        return {"total": total, "scores": scores[offset:offset + limit]}
 
     except Exception as e:
         logger.error(f"Error listing scores for admin: {e}")
@@ -1303,6 +1409,7 @@ def _event_status(e: dict) -> str:
 
 
 @app.get("/admin/api/events", dependencies=[Depends(require_admin)])
+@app.get("/api/v1/admin/events", dependencies=[Depends(require_admin)])
 async def admin_list_events(request: Request):
     events = await database.list_events()
     return {"events": [
@@ -1316,6 +1423,7 @@ async def admin_list_events(request: Request):
 
 
 @app.get("/admin/api/events/{slug}/qr", dependencies=[Depends(require_admin)])
+@app.get("/api/v1/admin/events/{slug}/qr", dependencies=[Depends(require_admin)])
 async def admin_event_qr(slug: str, request: Request, kind: str = "game", format: str = "png"):
     """A QR code for one of an event's links, ready for a slide or poster.
 
@@ -1346,6 +1454,7 @@ async def admin_event_qr(slug: str, request: Request, kind: str = "game", format
 
 
 @app.put("/admin/api/events/{slug}", dependencies=[Depends(require_admin)])
+@app.put("/api/v1/admin/events/{slug}", dependencies=[Depends(require_admin)])
 async def admin_upsert_event(slug: str, event: EventUpsert):
     """Create an event or edit its name and window. Times are UTC; leave them out for always-open"""
     if not EVENT_SLUG_RE.match(slug):
@@ -1366,6 +1475,7 @@ async def admin_upsert_event(slug: str, event: EventUpsert):
 
 
 @app.patch("/admin/api/scores/{session_id}", dependencies=[Depends(require_admin)])
+@app.patch("/api/v1/admin/scores/{session_id}", dependencies=[Depends(require_admin)])
 async def admin_update_score(session_id: str, update: AdminScoreUpdate):
     """Edit a score's nickname, company or email"""
     try:
@@ -1390,6 +1500,7 @@ async def admin_update_score(session_id: str, update: AdminScoreUpdate):
 
 
 @app.delete("/admin/api/scores/{session_id}", dependencies=[Depends(require_admin)])
+@app.delete("/api/v1/admin/scores/{session_id}", dependencies=[Depends(require_admin)])
 async def admin_delete_score(session_id: str):
     """Delete a score - for clearing out test runs and junk entries"""
     try:
@@ -1409,58 +1520,49 @@ async def admin_delete_score(session_id: str):
 
 
 @app.get("/admin/export.csv", dependencies=[Depends(require_admin)])
-async def admin_export_csv(claimed_only: bool = False, event: str = "all"):
-    """Download scores as CSV, for spreadsheets and follow-up. ?event=<slug> exports one event's entrants (for its prize draw)"""
+@app.get("/api/v1/admin/export.csv", dependencies=[Depends(require_admin)])
+async def admin_export_csv(claimed_only: bool = False, event: str = "all", game: str | None = None):
+    """Download scores as CSV, for spreadsheets and follow-up. ?event=<slug> exports one event's
+    entrants (for its prize draw); ?game=<slug> one game's."""
     try:
-        rows = await database.get_all_scores_admin()
+        rows = await database.get_all_scores_admin(game)
         if event == "none":
             rows = [r for r in rows if not r["event"]]
         elif event != "all":
             rows = [r for r in rows if r["event"] == event]
+        games = await _games_by_slug()
 
         buffer = io.StringIO()
         writer = csv.writer(buffer)
         writer.writerow(
-            [
-                "rank",
-                "nickname",
-                "company",
-                "email",
-                "total_savings",
-                "final_bill",
-                "claimed",
-                "source",
-                "event",
-                "played_at",
-                "claimed_at",
-                "session_id",
-            ]
+            ["rank", "nickname", "company", "email", "score", "secondary", "claimed", "source",
+             "event", "game", "played_at", "claimed_at", "session_id"]
         )
 
+        position: dict = {}
         exported = 0
-        for index, row in enumerate(rows):
+        for row in rows:
+            position[row["game"]] = position.get(row["game"], 0) + 1
             if claimed_only and not row["email"]:
                 continue
-
-            writer.writerow(
-                [
-                    index + 1,
-                    row["nickname"] or "",
-                    row["company"] or "",
-                    row["email"] or "",
-                    row["total_savings"],
-                    row["final_bill"],
-                    "yes" if row["email"] else "no",
-                    row["source"],
-                    row["event"] or "",
-                    row["timestamp"].isoformat() if row["timestamp"] else "",
-                    row["claimed_at"].isoformat() if row["claimed_at"] else "",
-                    row["session_id"],
-                ]
-            )
+            writer.writerow([
+                position[row["game"]],
+                row["nickname"] or "",
+                row["company"] or "",
+                row["email"] or "",
+                row["score"],
+                row["secondary"] if row["secondary"] is not None else "",
+                "yes" if row["email"] else "no",
+                row["source"],
+                row["event"] or "",
+                row["game"],
+                row["timestamp"].isoformat() if row["timestamp"] else "",
+                row["claimed_at"].isoformat() if row["claimed_at"] else "",
+                row["session_id"],
+            ])
             exported += 1
 
-        filename = f"inkless-scores-{datetime.utcnow().strftime('%Y-%m-%d')}.csv"
+        filename = f"leaderboard-scores-{datetime.utcnow().strftime('%Y-%m-%d')}.csv"
         logger.info(f"Admin exported {exported} scores as CSV")
 
         return Response(
@@ -1492,14 +1594,14 @@ async def get_emails(admin_key: str = None):
                 
                 if company_exists:
                     emails = await conn.fetch("""
-                        SELECT email, nickname, company, total_savings, final_bill, claimed_at, timestamp
+                        SELECT email, nickname, company, score AS total_savings, secondary AS final_bill, claimed_at, timestamp
                         FROM scores 
                         WHERE email IS NOT NULL 
                         ORDER BY claimed_at DESC
                     """)
                 else:
                     emails = await conn.fetch("""
-                        SELECT email, nickname, total_savings, final_bill, claimed_at, timestamp
+                        SELECT email, nickname, score AS total_savings, secondary AS final_bill, claimed_at, timestamp
                         FROM scores 
                         WHERE email IS NOT NULL 
                         ORDER BY claimed_at DESC
@@ -1507,7 +1609,7 @@ async def get_emails(admin_key: str = None):
             except Exception:
                 # Fallback query without company column
                 emails = await conn.fetch("""
-                    SELECT email, nickname, total_savings, final_bill, claimed_at, timestamp
+                    SELECT email, nickname, score AS total_savings, secondary AS final_bill, claimed_at, timestamp
                     FROM scores 
                     WHERE email IS NOT NULL 
                     ORDER BY claimed_at DESC
@@ -1629,3 +1731,144 @@ async def test_claim_form(session_id: str):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+# ===========================================================================
+# Leaderboard API v1
+#
+#   Public            GET  /api/v1/games, /api/v1/games/{game}/leaderboard
+#   Game token        POST /api/v1/scores            (a game's server posts a finished game)
+#   Admin token or    GET/PUT /api/v1/admin/games, .../events; GET /api/v1/admin/scores,
+#   console cookie   export.csv; PATCH/DELETE /api/v1/admin/scores/{id}
+#   Console only     /admin/api/tokens               (create / list / revoke tokens)
+#
+# See /guide for how to add a leaderboard to a game, and /docs for the full schema.
+# ===========================================================================
+
+
+@app.get("/api/v1/games", tags=["public"])
+async def v1_list_games():
+    """Every game with a leaderboard, and how its scores rank and display"""
+    return {"games": [_game_public(g) for g in await database.list_games()]}
+
+
+@app.get("/api/v1/games/{game}/leaderboard", tags=["public"])
+async def v1_leaderboard(game: str, limit: int = 10, source: str = "all", event: str = "all"):
+    """One game's leaderboard (claimed scores, best first), optionally one event's board"""
+    return await _build_leaderboard(game, max(1, min(limit, 500)), source, event)
+
+
+@app.post("/api/v1/scores", tags=["game server"])
+async def v1_submit_score(score: ScoreV1, request: Request):
+    """Record a finished game. Call this from the game's SERVER with a game token (Authorization: Bearer lbk_...),
+    never from a browser: whoever can call it can set any score. Returns the player's claim and leaderboard links."""
+    tok = await _token_from_request(request)
+    if not tok:
+        raise HTTPException(status_code=401, detail="Missing or invalid token")
+    if tok["kind"] != "game" or tok["game"] != score.game:
+        raise HTTPException(status_code=403, detail="This token cannot submit scores for that game")
+
+    if not await database.get_game(score.game):
+        raise HTTPException(status_code=404, detail="Unknown game")
+
+    try:
+        await database.insert_score(
+            score.game, score.session_id, score.score, score.secondary,
+            score.details, score.source, score.event,
+        )
+    except asyncpg.UniqueViolationError:
+        # A retry of the same post is safe to repeat; report it rather than store a second score
+        raise HTTPException(status_code=409, detail="session_id already recorded")
+
+    origin = _origin(request)
+    event_q = f"&event={score.event}" if score.event else ""
+    logger.info(f"v1 score: game={score.game} session={score.session_id} score={score.score} token='{tok['name']}'")
+    return {
+        "success": True,
+        "session_id": score.session_id,
+        "claim_url": f"{origin}/claim/{score.session_id}",
+        "leaderboard_url": f"{origin}/leaderboard?game={score.game}{event_q}",
+    }
+
+
+@app.get("/api/v1/admin/games", dependencies=[Depends(require_admin)], tags=["admin"])
+@app.get("/admin/api/games", dependencies=[Depends(require_admin)], include_in_schema=False)
+async def admin_list_games():
+    games = await database.list_games()
+    return {"games": [{**_game_public(g), "score_count": g["score_count"]} for g in games]}
+
+
+@app.put("/api/v1/admin/games/{slug}", dependencies=[Depends(require_admin)], tags=["admin"])
+@app.put("/admin/api/games/{slug}", dependencies=[Depends(require_admin)], include_in_schema=False)
+async def admin_upsert_game(slug: str, game: GameUpsert):
+    """Create a game or edit how it ranks and displays. Changing sort order re-ranks existing scores."""
+    if not EVENT_SLUG_RE.match(slug):
+        raise HTTPException(status_code=400, detail="slug must be lowercase letters, numbers and hyphens")
+    if game.secondary_label and not game.secondary_format:
+        game.secondary_format = "int"
+    if not game.secondary_label:
+        game.secondary_format = None
+    await database.upsert_game(
+        slug, game.name, game.score_label, game.score_format, game.sort_order,
+        game.secondary_label, game.secondary_format, game.highscore_text,
+    )
+    logger.info(f"Admin saved game {slug}")
+    return {"success": True}
+
+
+@app.get("/admin/api/tokens", dependencies=[Depends(require_admin_cookie)], include_in_schema=False)
+async def admin_list_tokens():
+    tokens = await database.list_tokens()
+    return {"tokens": [
+        {"id": t["id"], "name": t["name"], "kind": t["kind"], "game": t["game"],
+         "prefix": t["token_prefix"],
+         "created_at": t["created_at"].isoformat() if t["created_at"] else None,
+         "last_used_at": t["last_used_at"].isoformat() if t["last_used_at"] else None,
+         "revoked": t["revoked_at"] is not None}
+        for t in tokens
+    ]}
+
+
+@app.post("/admin/api/tokens", dependencies=[Depends(require_admin_cookie)], include_in_schema=False)
+async def admin_create_token(body: TokenCreate):
+    """Mint a token. The secret is returned ONCE here and only its hash is kept."""
+    if body.kind == "game" and not await database.get_game(body.game):
+        raise HTTPException(status_code=404, detail="Unknown game: create it first")
+    token = TOKEN_PREFIX + secrets.token_urlsafe(32)
+    token_id = await database.create_token(
+        body.name, body.kind, body.game, token[:12], _hash_token(token))
+    logger.info(f"Admin created {body.kind} token '{body.name}' (id {token_id})")
+    return {"id": token_id, "name": body.name, "kind": body.kind, "game": body.game, "token": token,
+            "notice": "Copy this now: it cannot be shown again."}
+
+
+@app.delete("/admin/api/tokens/{token_id}", dependencies=[Depends(require_admin_cookie)], include_in_schema=False)
+async def admin_revoke_token(token_id: int):
+    if not await database.revoke_token(token_id):
+        raise HTTPException(status_code=404, detail="Token not found or already revoked")
+    logger.info(f"Admin revoked token {token_id}")
+    return {"success": True}
+
+
+@app.get("/guide", response_class=HTMLResponse, include_in_schema=False)
+async def guide_page():
+    """How to add a leaderboard to a game, rendered from guide.md"""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "guide.md")
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        raise HTTPException(status_code=404, detail="Guide not found")
+    try:
+        import markdown
+        body = markdown.markdown(text, extensions=["fenced_code", "tables"])
+    except Exception:
+        body = f"<pre>{html.escape(text)}</pre>"
+    return HTMLResponse(f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Add a leaderboard to your game</title>
+<style>
+body{{background:#000;color:#e8e8e8;font:16px/1.6 -apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;padding:24px}}
+main{{max-width:820px;margin:0 auto}} h1,h2,h3{{color:#fff}} h1{{border-bottom:1px solid #333;padding-bottom:10px}}
+a{{color:#FF6B35}} code{{background:#1a1a1a;padding:2px 6px;border-radius:4px;font-size:.92em}}
+pre{{background:#111;border:1px solid #2a2a2a;border-radius:8px;padding:14px;overflow-x:auto}} pre code{{background:none;padding:0}}
+table{{border-collapse:collapse;width:100%}} th,td{{border:1px solid #333;padding:8px 10px;text-align:left}} th{{background:#1a1a1a}}
+</style></head><body><main>{body}</main></body></html>""")

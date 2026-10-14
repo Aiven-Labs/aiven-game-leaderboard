@@ -1,4 +1,5 @@
 import asyncpg
+import json
 import os
 from datetime import datetime
 import logging
@@ -122,6 +123,58 @@ class Database:
                 ON CONFLICT (slug) DO NOTHING;
             """)
 
+            # ---- multiple games --------------------------------------------------------
+            # A game says how its scores rank and display, so one leaderboard service can serve
+            # any number of games. Disk Invaders is seeded as game zero.
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS games (
+                    slug VARCHAR(40) PRIMARY KEY,
+                    name VARCHAR(100) NOT NULL,
+                    score_label VARCHAR(40) NOT NULL DEFAULT 'Score',
+                    score_format VARCHAR(10) NOT NULL DEFAULT 'int',
+                    sort_order VARCHAR(4) NOT NULL DEFAULT 'desc',
+                    secondary_label VARCHAR(40),
+                    secondary_format VARCHAR(10),
+                    highscore_text VARCHAR(200) NOT NULL DEFAULT 'Your score: {score}',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            await conn.execute("""
+                INSERT INTO games (slug, name, score_label, score_format, sort_order,
+                                   secondary_label, secondary_format, highscore_text)
+                VALUES ('disk-invaders', 'Disk Invaders', 'Saved', 'money', 'desc',
+                        'Final bill', 'money', 'You saved {score}!')
+                ON CONFLICT (slug) DO NOTHING;
+            """)
+            await conn.execute("ALTER TABLE scores ADD COLUMN IF NOT EXISTS game VARCHAR(40) NOT NULL DEFAULT 'disk-invaders';")
+            await conn.execute("ALTER TABLE scores ADD COLUMN IF NOT EXISTS score BIGINT;")
+            await conn.execute("ALTER TABLE scores ADD COLUMN IF NOT EXISTS secondary BIGINT;")
+            await conn.execute("ALTER TABLE scores ADD COLUMN IF NOT EXISTS details JSONB;")
+            # Every score so far is a Disk Invaders score: savings is the ranked score, the bill its
+            # secondary. total_savings / final_bill stay populated for Disk Invaders (safe to roll back).
+            await conn.execute("UPDATE scores SET score = total_savings, secondary = final_bill WHERE score IS NULL;")
+            await conn.execute("ALTER TABLE scores ALTER COLUMN total_savings DROP NOT NULL;")
+            await conn.execute("ALTER TABLE scores ALTER COLUMN final_bill DROP NOT NULL;")
+            await conn.execute("ALTER TABLE scores ALTER COLUMN score SET NOT NULL;")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_game_event_score ON scores(game, event, score);")
+
+            # API tokens: only a hash is stored, so a lost token is replaced, never recovered.
+            #   kind 'game'  - may submit scores for one game
+            #   kind 'admin' - may use the management API (cannot mint tokens)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS api_tokens (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(100) NOT NULL,
+                    kind VARCHAR(10) NOT NULL,
+                    game VARCHAR(40),
+                    token_prefix VARCHAR(16) NOT NULL,
+                    token_hash VARCHAR(64) UNIQUE NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_used_at TIMESTAMP,
+                    revoked_at TIMESTAMP
+                );
+            """)
+
             # Create indexes for better performance
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_session_id ON scores(session_id);
@@ -142,8 +195,9 @@ class Database:
             
         logger.info("Database tables created/verified")
 
-    async def submit_score(self, session_id: str, final_bill: int, total_savings: int, timestamp: str, source: str = 'arcade', event: str = None):
-        """Submit a new score to the database"""
+    async def insert_score(self, game: str, session_id: str, score: int, secondary: int = None,
+                           details: dict = None, source: str = 'arcade', event: str = None):
+        """Store a score for any game. Unclaimed until its owner attaches a nickname and email."""
         async with self.pool.acquire() as conn:
             # Only tag the score if the event exists and is open right now; otherwise it is
             # still saved, just not on any event board
@@ -158,14 +212,23 @@ class Database:
                     logger.info(f"Score {session_id}: event '{event}' unknown or closed, saving untagged")
                     event = None
 
-            # For simplicity, just use current UTC time
-            # The client timestamp is informational but we'll use server time for consistency
+            # Server time, not the caller's, so boards can't be back- or forward-dated
             dt = datetime.utcnow()
-            
+            # Disk Invaders also keeps its original columns filled, so a rollback loses nothing
+            legacy_savings = score if game == 'disk-invaders' else None
+            legacy_bill = secondary if game == 'disk-invaders' else None
+
             await conn.execute("""
-                INSERT INTO scores (session_id, final_bill, total_savings, timestamp, source, event)
-                VALUES ($1, $2, $3, $4, $5, $6)
-            """, session_id, final_bill, total_savings, dt, source, event)
+                INSERT INTO scores (session_id, game, score, secondary, details, total_savings, final_bill,
+                                    timestamp, source, event)
+                VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10)
+            """, session_id, game, score, secondary,
+                json.dumps(details) if details is not None else None,
+                legacy_savings, legacy_bill, dt, source, event)
+
+    async def submit_score(self, session_id: str, final_bill: int, total_savings: int, timestamp: str, source: str = 'arcade', event: str = None):
+        """Original Disk Invaders entry point (the game server still posts here)"""
+        await self.insert_score('disk-invaders', session_id, total_savings, final_bill, None, source, event)
 
     async def get_score(self, session_id: str):
         """Get a score by session ID"""
@@ -174,15 +237,16 @@ class Database:
                 SELECT * FROM scores WHERE session_id = $1
             """, session_id)
     
-    async def get_user_by_nickname(self, nickname: str, event: str = None):
-        """Get user info by nickname, within one event (nicknames only need to be unique per board)"""
+    async def get_user_by_nickname(self, nickname: str, event: str = None, game: str = 'disk-invaders'):
+        """Get user info by nickname, within one board (nicknames only need to be unique per game and event)"""
         async with self.pool.acquire() as conn:
             return await conn.fetchrow(
                 """SELECT email, nickname FROM scores
                    WHERE nickname = $1 AND email IS NOT NULL
+                     AND game = $3
                      AND event IS NOT DISTINCT FROM $2
                    LIMIT 1""",
-                nickname, event
+                nickname, event, game
             )
 
     async def claim_score(self, session_id: str, email: str, nickname: str, company: str = None):
@@ -236,166 +300,170 @@ class Database:
             return result > 0
 
     async def check_high_score(self, session_id: str):
-        """Check if a score is a high score and get ranking info"""
+        """Check if a score is a high score and get ranking info (within its own game and event)"""
         async with self.pool.acquire() as conn:
-            # Get the score details
             score_row = await conn.fetchrow("""
-                SELECT final_bill, total_savings, event FROM scores WHERE session_id = $1
+                SELECT game, score, event FROM scores WHERE session_id = $1
             """, session_id)
-            
             if not score_row:
                 return None
-            
-            # Calculate rank based on highest total savings among CLAIMED scores only
-            rank_row = await conn.fetchrow("""
+
+            game = await conn.fetchrow("SELECT sort_order FROM games WHERE slug = $1", score_row['game'])
+            better = "<" if game and game['sort_order'] == 'asc' else ">"
+
+            # Rank among CLAIMED scores only
+            rank_row = await conn.fetchrow(f"""
                 SELECT COUNT(*) + 1 as rank
-                FROM scores 
-                WHERE total_savings > $1
+                FROM scores
+                WHERE game = $1 AND score {better} $2
                 AND email IS NOT NULL
-                AND event IS NOT DISTINCT FROM $2
-            """, score_row['total_savings'], score_row['event'])
-            
-            # Get total number of CLAIMED scores
+                AND event IS NOT DISTINCT FROM $3
+            """, score_row['game'], score_row['score'], score_row['event'])
+
             total_row = await conn.fetchrow("""
-                SELECT COUNT(*) as total 
-                FROM scores 
-                WHERE email IS NOT NULL
-                AND event IS NOT DISTINCT FROM $1
-            """, score_row['event'])
-            
+                SELECT COUNT(*) as total
+                FROM scores
+                WHERE game = $1 AND email IS NOT NULL
+                AND event IS NOT DISTINCT FROM $2
+            """, score_row['game'], score_row['event'])
+
             rank = rank_row['rank']
             total = total_row['total']
-            
+
             # Consider top 10% as "high scores"
             is_high_score = rank <= max(1, total * 0.1) if total > 0 else False
-            
+
             return {
+                'game': score_row['game'],
                 'event': score_row['event'],
                 'is_high_score': is_high_score,
                 'rank': rank,
                 'total_scores': total
             }
 
-    async def get_leaderboard(self, limit: int = None, source: str = None, event: str = None):
-        """Get all scores for leaderboard (claimed and unclaimed)"""
-        async with self.pool.acquire() as conn:
-            # Check if nickname and company columns exist first
-            try:
-                nickname_exists = await conn.fetchval("""
-                    SELECT column_name FROM information_schema.columns 
-                    WHERE table_name='scores' AND column_name='nickname';
-                """)
-                
-                company_exists = await conn.fetchval("""
-                    SELECT column_name FROM information_schema.columns 
-                    WHERE table_name='scores' AND column_name='company';
-                """)
-                
-                # Build query based on available columns
-                select_fields = [
-                    "session_id",
-                    "final_bill", 
-                    "total_savings",
-                    "email",
-                    "timestamp",
-                    "claimed_at",
-                    "source",
-                    "event"
-                ]
-                
-                if nickname_exists:
-                    select_fields.append("nickname")
-                if company_exists:
-                    select_fields.append("company")
-                
-                select_clause = ", ".join(select_fields)
-                
-                # event: None = every score; "none" = scores with no event; otherwise one event's board
-                clauses, args = [], []
-                if source:
-                    args.append(source)
-                    clauses.append(f"source = ${len(args)}")
-                if event == "none":
-                    clauses.append("event IS NULL")
-                elif event:
-                    args.append(event)
-                    clauses.append(f"event = ${len(args)}")
-                where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-                query = f"""
-                    SELECT 
-                        {select_clause},
-                        ROW_NUMBER() OVER (ORDER BY total_savings DESC) as rank
-                    FROM scores
-                    {where}
-                    ORDER BY total_savings DESC
-                """
-                
-                if limit:
-                    query += f" LIMIT {int(limit)}"
-                    
-                rows = await conn.fetch(query, *args)
-                
-                # Convert to list of dictionaries and ensure all expected fields exist
-                result = []
-                for row in rows:
-                    row_dict = dict(row)
-                    if 'nickname' not in row_dict:
-                        row_dict['nickname'] = None
-                    if 'company' not in row_dict:
-                        row_dict['company'] = None
-                    result.append(row_dict)
-                
-                return result
-                
-            except Exception as e:
-                logger.error(f"Error in get_leaderboard: {e}")
-                # Fallback to basic query without nickname/company
-                query = """
-                    SELECT 
-                        session_id,
-                        final_bill,
-                        total_savings,
-                        email,
-                        timestamp,
-                        claimed_at,
-                        ROW_NUMBER() OVER (ORDER BY total_savings DESC) as rank
-                    FROM scores
-                    ORDER BY total_savings DESC
-                """
-                if limit:
-                    query += f" LIMIT {limit}"
-                    
-                rows = await conn.fetch(query)
-                result = []
-                for row in rows:
-                    row_dict = dict(row)
-                    row_dict['nickname'] = None  # Add missing fields
-                    row_dict['company'] = None
-                    result.append(row_dict)
-                
-                return result
+    async def get_leaderboard(self, limit: int = None, source: str = None, event: str = None, game: str = 'disk-invaders'):
+        """Scores for one game's leaderboard (claimed and unclaimed; callers filter), best first.
 
-    async def get_all_scores_admin(self):
-        """Get every score with all columns, for the admin console"""
+        event: None = every score; "none" = scores with no event; otherwise one event's board.
+        Ranks honour the game's sort order (lowest wins for time-based games)."""
+        async with self.pool.acquire() as conn:
+            game_row = await conn.fetchrow("SELECT sort_order FROM games WHERE slug = $1", game)
+            direction = "ASC" if game_row and game_row['sort_order'] == 'asc' else "DESC"
+
+            clauses, args = ["game = $1"], [game]
+            if source:
+                args.append(source)
+                clauses.append(f"source = ${len(args)}")
+            if event == "none":
+                clauses.append("event IS NULL")
+            elif event:
+                args.append(event)
+                clauses.append(f"event = ${len(args)}")
+
+            query = f"""
+                SELECT session_id, game, score, secondary, details, email, nickname, company,
+                       timestamp, claimed_at, source, event,
+                       ROW_NUMBER() OVER (ORDER BY score {direction}, timestamp ASC) as rank
+                FROM scores
+                WHERE {" AND ".join(clauses)}
+                ORDER BY score {direction}, timestamp ASC
+            """
+            if limit:
+                query += f" LIMIT {int(limit)}"
+
+            rows = await conn.fetch(query, *args)
+            return [dict(r) for r in rows]
+
+    async def get_all_scores_admin(self, game: str = None):
+        """Scores with every column, for the admin console (optionally one game's)"""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(f"""
+                SELECT
+                    s.id,
+                    s.session_id,
+                    s.game,
+                    s.score,
+                    s.secondary,
+                    s.details,
+                    s.timestamp,
+                    s.email,
+                    s.nickname,
+                    s.company,
+                    s.claimed_at,
+                    s.created_at,
+                    s.source,
+                    s.event,
+                    COALESCE(g.sort_order, 'desc') AS sort_order
+                FROM scores s
+                LEFT JOIN games g ON g.slug = s.game
+                {"WHERE s.game = $1" if game else ""}
+                ORDER BY s.game, CASE WHEN COALESCE(g.sort_order, 'desc') = 'asc' THEN s.score END ASC,
+                         s.score DESC
+            """, *([game] if game else []))
+            return [dict(row) for row in rows]
+
+    # ---- games --------------------------------------------------------------
+
+    async def list_games(self):
         async with self.pool.acquire() as conn:
             rows = await conn.fetch("""
-                SELECT
-                    id,
-                    session_id,
-                    final_bill,
-                    total_savings,
-                    timestamp,
-                    email,
-                    nickname,
-                    company,
-                    claimed_at,
-                    created_at,
-                    source,
-                    event
-                FROM scores
-                ORDER BY total_savings DESC
+                SELECT g.*, (SELECT COUNT(*) FROM scores s WHERE s.game = g.slug) AS score_count
+                FROM games g ORDER BY g.created_at, g.slug
             """)
-            return [dict(row) for row in rows]
+            return [dict(r) for r in rows]
+
+    async def get_game(self, slug: str):
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT * FROM games WHERE slug = $1", slug)
+            return dict(row) if row else None
+
+    async def upsert_game(self, slug: str, name: str, score_label: str, score_format: str,
+                          sort_order: str, secondary_label, secondary_format, highscore_text: str):
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO games (slug, name, score_label, score_format, sort_order,
+                                   secondary_label, secondary_format, highscore_text)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name,
+                    score_label = EXCLUDED.score_label, score_format = EXCLUDED.score_format,
+                    sort_order = EXCLUDED.sort_order, secondary_label = EXCLUDED.secondary_label,
+                    secondary_format = EXCLUDED.secondary_format, highscore_text = EXCLUDED.highscore_text
+            """, slug, name, score_label, score_format, sort_order, secondary_label, secondary_format, highscore_text)
+
+    # ---- API tokens ---------------------------------------------------------
+
+    async def create_token(self, name: str, kind: str, game, token_prefix: str, token_hash: str):
+        async with self.pool.acquire() as conn:
+            return await conn.fetchval("""
+                INSERT INTO api_tokens (name, kind, game, token_prefix, token_hash)
+                VALUES ($1, $2, $3, $4, $5) RETURNING id
+            """, name, kind, game, token_prefix, token_hash)
+
+    async def list_tokens(self):
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT id, name, kind, game, token_prefix, created_at, last_used_at, revoked_at
+                FROM api_tokens ORDER BY created_at DESC
+            """)
+            return [dict(r) for r in rows]
+
+    async def revoke_token(self, token_id: int) -> bool:
+        async with self.pool.acquire() as conn:
+            result = await conn.execute("""
+                UPDATE api_tokens SET revoked_at = (NOW() AT TIME ZONE 'UTC')
+                WHERE id = $1 AND revoked_at IS NULL
+            """, token_id)
+            return result == "UPDATE 1"
+
+    async def authenticate_token(self, token_hash: str):
+        """The live token row for this hash (and stamp it as used), or None"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                UPDATE api_tokens SET last_used_at = (NOW() AT TIME ZONE 'UTC')
+                WHERE token_hash = $1 AND revoked_at IS NULL
+                RETURNING id, name, kind, game
+            """, token_hash)
+            return dict(row) if row else None
 
     async def list_events(self):
         async with self.pool.acquire() as conn:

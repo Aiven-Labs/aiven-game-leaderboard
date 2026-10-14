@@ -268,6 +268,7 @@
             <button class="filter-btn" data-source="all" onclick="setSource('all')">All</button>
             <button class="filter-btn" data-source="arcade" onclick="setSource('arcade')">Arcade</button>
             <button class="filter-btn" data-source="web" onclick="setSource('web')">Web</button>
+            <select id="game-select" class="event-select" aria-label="Game" onchange="setGame(this.value)" style="display:none"></select>
             <select id="event-select" class="event-select" aria-label="Event" onchange="setEvent(this.value)">
                 <option value="all">All events</option>
             </select>
@@ -283,8 +284,8 @@
                     <div>Rank</div>
                     <div>Player</div>
                     <div class="company-header">Company</div>
-                    <div>Saved</div>
-                    <div>Final Bill</div>
+                    <div id="h-score">Saved</div>
+                    <div id="h-secondary">Final Bill</div>
                     <div class="date-header">Date</div>
                 </div>
                 <div id="leaderboard-data"></div>
@@ -344,6 +345,44 @@
             return 'all';
         })();
 
+        // Which game's board. Defaults to Disk Invaders; ?game=<slug> picks another. The picker only
+        // appears once the service has more than one game.
+        let currentGame = (function () {
+            const fromUrl = new URLSearchParams(window.location.search).get('game');
+            return fromUrl && /^[a-z0-9][a-z0-9-]{0,39}$/.test(fromUrl) ? fromUrl : 'disk-invaders';
+        })();
+        let gameList = [];
+
+        async function loadGames() {
+            const select = document.getElementById('game-select');
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/v1/games`);
+                if (res.ok) {
+                    gameList = (await res.json()).games;
+                    select.innerHTML = '';
+                    gameList.forEach(function (g) {
+                        const opt = document.createElement('option');
+                        opt.value = g.slug;
+                        opt.textContent = g.name;
+                        select.appendChild(opt);
+                    });
+                    select.style.display = gameList.length > 1 ? '' : 'none';
+                    if (!gameList.some(function (g) { return g.slug === currentGame; }) && gameList.length) {
+                        currentGame = gameList[0].slug;
+                    }
+                    select.value = currentGame;
+                }
+            } catch (e) { /* stays on the default game */ }
+        }
+
+        function setGame(game) {
+            currentGame = game;
+            const url = new URL(window.location.href);
+            url.searchParams.set('game', game);
+            window.history.replaceState(null, '', url);
+            loadLeaderboard();
+        }
+
         // Which event's board: "all", "none" (no event) or an event slug. ?event=pgconf-2026 links
         // straight to one event's board, which is what booths and slide-deck QR codes use.
         let currentEvent = (function () {
@@ -386,7 +425,11 @@
         function updateHeading() {
             const names = window.__eventNames || {};
             const h1 = document.querySelector('.header h1');
-            if (h1) h1.textContent = '\u{1F3C6} ' + (names[currentEvent] ? names[currentEvent] + ' Leaderboard' : 'Leaderboard');
+            const game = gameList.find(function (g) { return g.slug === currentGame; });
+            const parts = [];
+            if (names[currentEvent]) parts.push(names[currentEvent]);
+            if (gameList.length > 1 && game) parts.push(game.name);
+            if (h1) h1.textContent = '\u{1F3C6} ' + (parts.length ? parts.join(' \u00B7 ') + ' ' : '') + 'Leaderboard';
         }
 
         function updateFilterButtons() {
@@ -416,7 +459,7 @@
             error.style.display = 'none';
 
             try {
-                const response = await fetch(`${API_BASE_URL}/api/leaderboard?limit=20&source=${currentSource}&event=${currentEvent}`);
+                const response = await fetch(`${API_BASE_URL}/api/leaderboard?limit=20&source=${currentSource}&event=${currentEvent}&game=${currentGame}`);
                 
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -424,6 +467,16 @@
 
                 const data = await response.json();
                 
+                // Column titles follow the game ("Saved" / "Final bill" for Disk Invaders, a time or points elsewhere)
+                if (data.game) {
+                    // The Kafka-bill tagline is Disk Invaders'; other games get a neutral one
+                    const sub = document.querySelector('.header p');
+                    if (sub) sub.textContent = data.game.slug === 'disk-invaders'
+                        ? 'Top players who saved the most on their Kafka bills!' : 'Top players';
+                    document.getElementById('h-score').textContent = data.game.score_label;
+                    document.getElementById('h-secondary').textContent = data.game.secondary_label || '';
+                }
+
                 if (!data.leaderboard || data.leaderboard.length === 0) {
                     leaderboardData.innerHTML = '<div class="no-scores">No scores claimed yet' + (currentSource === 'all' ? '' : ' for ' + currentSource) + '. Be the first!</div>';
                 } else {
@@ -432,8 +485,8 @@
                             <div class="rank ${score.rank <= 3 ? 'top-3 ' + getRankClass(score.rank) : ''}">${getRankDisplay(score.rank)}</div>
                             <div class="nickname">${escapeHtml(score.nickname)}</div>
                             <div class="company">${score.company ? escapeHtml(score.company) : '—'}</div>
-                            <div class="savings">${score.total_savings}</div>
-                            <div class="bill">${score.final_bill}</div>
+                            <div class="savings">${escapeHtml(score.score_display || score.total_savings || '')}</div>
+                            <div class="bill">${escapeHtml(score.secondary_display || '—')}</div>
                             <div class="date">${formatDate(score.timestamp)}</div>
                         </div>
                     `).join('');
@@ -465,7 +518,7 @@
         }
 
         // Load leaderboard on page load
-        document.addEventListener('DOMContentLoaded', function () { loadEvents().then(loadLeaderboard); });
+        document.addEventListener('DOMContentLoaded', function () { Promise.all([loadGames(), loadEvents()]).then(loadLeaderboard); });
 
         // Auto-refresh every 30 seconds
         setInterval(loadLeaderboard, 30000);

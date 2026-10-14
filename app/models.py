@@ -1,6 +1,7 @@
 from pydantic import BaseModel, EmailStr, validator
 from datetime import datetime
 from typing import Literal, Optional
+import json
 import re
 
 class ScoreSubmission(BaseModel):
@@ -121,6 +122,7 @@ class ScoreResponse(BaseModel):
     message: str
 
 class HighScoreCheck(BaseModel):
+    game: Optional[str] = None
     event: Optional[str] = None
     is_high_score: bool
     rank: Optional[int] = None
@@ -144,3 +146,115 @@ class EventUpsert(BaseModel):
         if not 1 <= len(v) <= 100:
             raise ValueError('Name must be 1-100 characters')
         return v
+
+
+SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9-]{0,39}$')
+
+
+class GameUpsert(BaseModel):
+    """A game's identity and how its scores rank and display."""
+    name: str
+    score_label: str = 'Score'
+    score_format: Literal['int', 'money', 'time_ms'] = 'int'
+    # 'desc': higher is better. 'asc': lower is better (times, move counts)
+    sort_order: Literal['desc', 'asc'] = 'desc'
+    secondary_label: Optional[str] = None
+    secondary_format: Optional[Literal['int', 'money', 'time_ms']] = None
+    # Shown on the claim page for a high score; {score} is replaced with the formatted score
+    highscore_text: str = 'Your score: {score}'
+
+    @validator('name')
+    def name_ok(cls, v):
+        v = v.strip()
+        if not 1 <= len(v) <= 100:
+            raise ValueError('Name must be 1-100 characters')
+        return v
+
+    @validator('score_label', 'secondary_label')
+    def label_ok(cls, v):
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) > 40:
+            raise ValueError('Labels must be 40 characters or fewer')
+        return v or None
+
+    @validator('highscore_text')
+    def text_ok(cls, v):
+        v = v.strip()
+        if not 1 <= len(v) <= 200:
+            raise ValueError('High-score text must be 1-200 characters')
+        return v
+
+
+class ScoreV1(BaseModel):
+    """A finished game, posted by a game's server (never a browser) with that game's token."""
+    game: str
+    # Also the player's claim id: whoever holds it can attach a nickname and email to this score
+    session_id: str
+    score: int
+    secondary: Optional[int] = None
+    # Anything else worth keeping (level reached, duration...); small JSON object
+    details: Optional[dict] = None
+    event: Optional[str] = None
+    source: Literal['arcade', 'web', 'other'] = 'web'
+
+    @validator('game')
+    def game_ok(cls, v):
+        v = v.strip().lower()
+        if not SLUG_RE.match(v):
+            raise ValueError('invalid game slug')
+        return v
+
+    @validator('session_id')
+    def session_ok(cls, v):
+        if not re.match(r'^[A-Za-z0-9_-]{8,64}$', v):
+            raise ValueError('session_id must be 8-64 characters: letters, numbers, - and _')
+        return v
+
+    @validator('score', 'secondary')
+    def score_range(cls, v):
+        if v is None:
+            return v
+        if not 0 <= v <= 9_007_199_254_740_991:
+            raise ValueError('scores must be whole numbers from 0 to 2^53')
+        return v
+
+    @validator('event')
+    def event_ok(cls, v):
+        if v is None:
+            return None
+        v = v.strip().lower()
+        if not v:
+            return None
+        if not SLUG_RE.match(v):
+            raise ValueError('invalid event')
+        return v
+
+    @validator('details')
+    def details_small(cls, v):
+        if v is not None and len(json.dumps(v)) > 2000:
+            raise ValueError('details must be under 2000 characters of JSON')
+        return v
+
+
+class TokenCreate(BaseModel):
+    name: str
+    # 'game': submit scores for one game. 'admin': use the management API
+    kind: Literal['game', 'admin']
+    game: Optional[str] = None
+
+    @validator('name')
+    def name_ok(cls, v):
+        v = v.strip()
+        if not 1 <= len(v) <= 100:
+            raise ValueError('Name must be 1-100 characters')
+        return v
+
+    @validator('game')
+    def game_ok(cls, v, values):
+        if values.get('kind') == 'game':
+            if not v or not SLUG_RE.match(v):
+                raise ValueError('a game token needs a game slug')
+            return v
+        return None

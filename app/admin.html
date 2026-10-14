@@ -189,6 +189,10 @@
         .tabs .tab.active .count { background: #FF6B35; color: #000000; }
         .tabs-spacer { flex: 1; }
         .tabs > button.secondary { margin-bottom: 6px; }
+        .reveal { border: 1px solid #FF6B35; background: #1a1008; border-radius: 8px; padding: 14px 16px; margin: 0 0 16px; }
+        .reveal-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 10px 0 6px; }
+        .reveal code { background: #000; padding: 8px 10px; border-radius: 6px; word-break: break-all; user-select: all; -webkit-user-select: all; }
+        .tab-intro a { color: #FF6B35; }
         .tab-intro { margin: 20px 0 6px; max-width: 900px; line-height: 1.5; }
 
         .hidden { display: none !important; }
@@ -221,6 +225,8 @@
             <nav class="tabs" role="tablist" aria-label="Admin sections">
                 <button class="tab" role="tab" id="tab-btn-scores" data-tab="scores" aria-controls="tab-scores">Scores <span class="count" id="count-scores"></span></button>
                 <button class="tab" role="tab" id="tab-btn-events" data-tab="events" aria-controls="tab-events">Events <span class="count" id="count-events"></span></button>
+                <button class="tab" role="tab" id="tab-btn-games" data-tab="games" aria-controls="tab-games">Games <span class="count" id="count-games"></span></button>
+                <button class="tab" role="tab" id="tab-btn-api" data-tab="api" aria-controls="tab-api">API <span class="count" id="count-api"></span></button>
                 <span class="tabs-spacer"></span>
                 <button class="secondary" id="logout">Sign out</button>
             </nav>
@@ -228,6 +234,9 @@
             <section id="tab-scores" role="tabpanel" aria-labelledby="tab-btn-scores">
                 <div class="toolbar">
                     <input type="text" id="search" placeholder="Filter by nickname, company or email…">
+                    <select id="game-filter" title="Show one game's scores; exports follow this too">
+                        <option value="all">All games</option>
+                    </select>
                     <select id="event-filter" title="Show one event's scores; exports follow this too">
                         <option value="all">All events</option>
                         <option value="none">No event</option>
@@ -245,9 +254,10 @@
                             <th>Nickname</th>
                             <th>Company</th>
                             <th>Email</th>
-                            <th style="text-align:right">Savings</th>
-                            <th style="text-align:right">Final bill</th>
+                            <th style="text-align:right">Score</th>
+                            <th style="text-align:right">Secondary</th>
                             <th>Status</th>
+                            <th>Game</th>
                             <th>Source</th>
                             <th>Event</th>
                             <th style="text-align:right">Played</th>
@@ -278,6 +288,53 @@
                     <tbody id="event-rows"></tbody>
                 </table>
             </div>
+            </section>
+
+            <section id="tab-games" role="tabpanel" aria-labelledby="tab-btn-games" class="hidden">
+                <p class="muted tab-intro"><strong>A game says how its scores rank and display.</strong> Add one here, then make a Game token in the API tab so the game's server can post scores. Higher-wins suits points; lower-wins suits times and move counts. Changing the order re-ranks the game's existing scores.</p>
+                <form id="game-form" class="toolbar" style="margin:0 0 8px">
+                    <input type="text" id="g-slug" placeholder="slug, e.g. my-game" pattern="[a-z0-9][a-z0-9-]{0,39}" required>
+                    <input type="text" id="g-name" placeholder="Game name" maxlength="100" required>
+                    <input type="text" id="g-score-label" placeholder="Score label (Points)" maxlength="40" required>
+                    <select id="g-score-format" title="How the score is shown"><option value="int">Number (1,234)</option><option value="money">Money ($1.2k)</option><option value="time_ms">Time (1:02.345)</option></select>
+                    <select id="g-sort" title="Which scores win"><option value="desc">Higher wins</option><option value="asc">Lower wins</option></select>
+                    <input type="text" id="g-sec-label" placeholder="Second stat label (optional)" maxlength="40">
+                    <select id="g-sec-format" title="How the second stat is shown"><option value="int">Number</option><option value="money">Money</option><option value="time_ms">Time</option></select>
+                    <input type="text" id="g-highscore" placeholder="High-score text: Your score: {score}" maxlength="200" style="min-width:260px">
+                    <button type="submit">Save game</button>
+                </form>
+                <div class="message hidden" id="game-message"></div>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Game</th><th>Score</th><th>Second stat</th><th style="text-align:right">Scores</th><th>Leaderboard</th><th></th></tr></thead>
+                        <tbody id="game-rows"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section id="tab-api" role="tabpanel" aria-labelledby="tab-btn-api" class="hidden">
+                <p class="muted tab-intro"><strong>Tokens let a game's server post scores, or a script manage the leaderboard.</strong> A <em>Game</em> token can only submit scores for its one game. An <em>Admin</em> token can use the management API (it cannot make tokens). The secret is shown <strong>once</strong>; only a hash is kept. <a href="/guide" target="_blank" rel="noopener">How to add a leaderboard to a game</a> &middot; <a href="/docs" target="_blank" rel="noopener">API reference</a></p>
+                <div class="muted" style="margin:0 0 14px">API base URL: <code id="api-base"></code> <button class="secondary" id="copy-base">Copy</button></div>
+
+                <div id="token-reveal" class="reveal hidden">
+                    <strong>Copy this token now. It cannot be shown again.</strong>
+                    <div class="reveal-row"><code id="token-value"></code> <button id="copy-token">Copy token</button> <button class="secondary" id="dismiss-token">Done</button></div>
+                    <div class="muted" id="token-note"></div>
+                </div>
+
+                <form id="token-form" class="toolbar" style="margin:0 0 8px">
+                    <input type="text" id="t-name" placeholder="Name, e.g. my-game production" maxlength="100" required>
+                    <select id="t-kind"><option value="game">Game token (submit scores)</option><option value="admin">Admin token (management API)</option></select>
+                    <select id="t-game" title="Game this token may submit scores for"></select>
+                    <button type="submit">Create token</button>
+                </form>
+                <div class="message hidden" id="token-message"></div>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Name</th><th>Type</th><th>Game</th><th>Token starts</th><th>Created</th><th>Last used</th><th>Status</th><th></th></tr></thead>
+                        <tbody id="token-rows"></tbody>
+                    </table>
+                </div>
             </section>
         </div>
     </div>
@@ -329,9 +386,10 @@
                         <td><input type="text" data-field="nickname" value="${escapeHtml(score.nickname)}" placeholder="nickname"></td>
                         <td><input type="text" data-field="company" value="${escapeHtml(score.company)}" placeholder="company"></td>
                         <td><input type="email" data-field="email" value="${escapeHtml(score.email)}" placeholder="email"></td>
-                        <td class="savings">${money(score.total_savings)}</td>
-                        <td class="bill">${money(score.final_bill)}</td>
+                        <td class="savings">${escapeHtml(score.score_display)}</td>
+                        <td class="bill">${escapeHtml(score.secondary_display) || '—'}</td>
                         <td><span class="pill ${score.claimed ? 'claimed' : 'unclaimed'}">${score.claimed ? 'claimed' : 'unclaimed'}</span></td>
+                        <td class="company">${escapeHtml(score.game)}</td>
                         <td class="company">${escapeHtml(score.source)}</td>
                         <td class="company">${escapeHtml(score.event) || '—'}</td>
                         <td class="date">${shortDate(score.played_at)}</td>
@@ -348,10 +406,11 @@
                     <td class="nickname">${escapeHtml(score.nickname) || '<span class="company">—</span>'}</td>
                     <td class="company">${escapeHtml(score.company) || '—'}</td>
                     <td class="email">${escapeHtml(score.email) || '—'}</td>
-                    <td class="savings">${money(score.total_savings)}</td>
-                    <td class="bill">${money(score.final_bill)}</td>
+                    <td class="savings">${escapeHtml(score.score_display)}</td>
+                    <td class="bill">${escapeHtml(score.secondary_display) || '—'}</td>
                     <td><span class="pill ${score.claimed ? 'claimed' : 'unclaimed'}">${score.claimed ? 'claimed' : 'unclaimed'}</span></td>
-                    <td class="company">${escapeHtml(score.source)}</td>
+                    <td class="company">${escapeHtml(score.game)}</td>
+                        <td class="company">${escapeHtml(score.source)}</td>
                     <td class="company">${escapeHtml(score.event) || '—'}</td>
                     <td class="date">${shortDate(score.played_at)}</td>
                     <td class="actions">
@@ -364,7 +423,9 @@
         function render() {
             const term = el('search').value.trim().toLowerCase();
             const ev = el('event-filter').value;
-            const inEvent = (s) => ev === 'all' || (ev === 'none' ? !s.event : s.event === ev);
+            const gm = el('game-filter').value;
+            const inEvent = (s) => (ev === 'all' || (ev === 'none' ? !s.event : s.event === ev))
+                && (gm === 'all' || s.game === gm);
             const visible = scores.filter((s) => inEvent(s) && (!term
                 || [s.nickname, s.company, s.email].some((f) => (f || '').toLowerCase().includes(term))));
 
@@ -384,13 +445,13 @@
             el('count-scores').textContent = scores.length;
             el('summary').textContent =
                 `${scores.length} scores · ${claimed} claimed` +
-                ((term || ev !== 'all') ? ` · showing ${visible.length}` : '');
+                ((term || ev !== 'all' || gm !== 'all') ? ` · showing ${visible.length}` : '');
         }
 
         async function load() {
             const message = el('table-message');
             try {
-                const res = await fetch('/admin/api/scores', { credentials: 'same-origin' });
+                const res = await fetch('/admin/api/scores?limit=20000', { credentials: 'same-origin' });
 
                 if (res.status === 401) {
                     showGate();
@@ -522,9 +583,11 @@
 
         el('search').addEventListener('input', render);
         el('refresh').addEventListener('click', load);
+        function gameParam() { const g = el('game-filter').value; return g === 'all' ? '' : '&game=' + encodeURIComponent(g); }
         el('event-filter').addEventListener('change', render);
-        el('export-all').addEventListener('click', () => { window.location = '/admin/export.csv?event=' + encodeURIComponent(el('event-filter').value); });
-        el('export-claimed').addEventListener('click', () => { window.location = '/admin/export.csv?claimed_only=true&event=' + encodeURIComponent(el('event-filter').value); });
+        el('game-filter').addEventListener('change', render);
+        el('export-all').addEventListener('click', () => { window.location = '/admin/export.csv?event=' + encodeURIComponent(el('event-filter').value) + gameParam(); });
+        el('export-claimed').addEventListener('click', () => { window.location = '/admin/export.csv?claimed_only=true&event=' + encodeURIComponent(el('event-filter').value) + gameParam(); });
 
         el('logout').addEventListener('click', async () => {
             await fetch('/admin/logout', { method: 'POST', credentials: 'same-origin' });
@@ -533,7 +596,7 @@
         });
 
         // ---- tabs ----
-        const TABS = ['scores', 'events'];
+        const TABS = ['scores', 'events', 'games', 'api'];
 
         function showTab(name, updateUrl = true) {
             if (!TABS.includes(name)) name = 'scores';
@@ -646,7 +709,160 @@
             }
         });
 
-        load().then(loadEvents);
+        // ---- games ----
+        let games = [];
+        const FORMAT_NAMES = { int: 'number', money: 'money', time_ms: 'time' };
+
+        function renderGames() {
+            el('count-games').textContent = games.length;
+            el('game-rows').innerHTML = games.map((g) => `
+                <tr>
+                    <td><strong>${escapeHtml(g.name)}</strong><br><span class="muted">${escapeHtml(g.slug)}</span></td>
+                    <td>${escapeHtml(g.score_label)}<br><span class="muted">${FORMAT_NAMES[g.score_format]} &middot; ${g.sort_order === 'asc' ? 'lower wins' : 'higher wins'}</span></td>
+                    <td>${g.secondary_label ? escapeHtml(g.secondary_label) + '<br><span class="muted">' + FORMAT_NAMES[g.secondary_format] + '</span>' : '<span class="muted">none</span>'}</td>
+                    <td class="savings">${g.score_count}</td>
+                    <td><a href="/leaderboard?game=${encodeURIComponent(g.slug)}" target="_blank" rel="noopener">View</a></td>
+                    <td class="actions"><button class="secondary" data-edit-game="${escapeHtml(g.slug)}">Edit</button></td>
+                </tr>`).join('') || '<tr><td colspan="6" class="muted">No games yet.</td></tr>';
+
+            const options = games.map((g) => `<option value="${escapeHtml(g.slug)}">${escapeHtml(g.name)}</option>`).join('');
+            const filter = el('game-filter');
+            const keep = filter.value;
+            filter.innerHTML = '<option value="all">All games</option>' + options;
+            filter.value = [...filter.options].some((o) => o.value === keep) ? keep : 'all';
+            const tg = el('t-game');
+            const keepTg = tg.value;
+            tg.innerHTML = options;
+            if ([...tg.options].some((o) => o.value === keepTg)) tg.value = keepTg;
+        }
+
+        async function loadGames() {
+            try {
+                const res = await fetch('/admin/api/games', { credentials: 'same-origin' });
+                if (res.ok) { games = (await res.json()).games; renderGames(); render(); }
+            } catch (err) { /* other tabs still work */ }
+        }
+
+        el('game-rows').addEventListener('click', (ev) => {
+            const g = games.find((x) => x.slug === ev.target.getAttribute('data-edit-game'));
+            if (!g) return;
+            el('g-slug').value = g.slug;
+            el('g-name').value = g.name;
+            el('g-score-label').value = g.score_label;
+            el('g-score-format').value = g.score_format;
+            el('g-sort').value = g.sort_order;
+            el('g-sec-label').value = g.secondary_label || '';
+            el('g-sec-format').value = g.secondary_format || 'int';
+            el('g-highscore').value = g.highscore_text;
+            el('g-name').focus();
+        });
+
+        el('game-form').addEventListener('submit', async (ev) => {
+            ev.preventDefault();
+            const msg = el('game-message');
+            try {
+                const res = await fetch('/admin/api/games/' + encodeURIComponent(el('g-slug').value.trim()), {
+                    method: 'PUT',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: el('g-name').value,
+                        score_label: el('g-score-label').value,
+                        score_format: el('g-score-format').value,
+                        sort_order: el('g-sort').value,
+                        secondary_label: el('g-sec-label').value.trim() || null,
+                        secondary_format: el('g-sec-label').value.trim() ? el('g-sec-format').value : null,
+                        highscore_text: el('g-highscore').value.trim() || 'Your score: {score}',
+                    }),
+                });
+                if (!res.ok) throw new Error(describe(await res.json().catch(() => ({}))));
+                msg.classList.add('hidden');
+                el('game-form').reset();
+                await loadGames();
+            } catch (err) {
+                msg.textContent = 'Could not save game: ' + err.message;
+                msg.classList.remove('hidden');
+                msg.classList.add('error');
+            }
+        });
+
+        // ---- API tokens ----
+        function when(iso) { return iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '\u2014'; }
+
+        async function loadTokens() {
+            el('api-base').textContent = window.location.origin;
+            try {
+                const res = await fetch('/admin/api/tokens', { credentials: 'same-origin' });
+                if (!res.ok) return;
+                const tokens = (await res.json()).tokens;
+                el('count-api').textContent = tokens.filter((t) => !t.revoked).length;
+                el('token-rows').innerHTML = tokens.map((t) => `
+                    <tr${t.revoked ? ' style="opacity:.5"' : ''}>
+                        <td><strong>${escapeHtml(t.name)}</strong></td>
+                        <td>${t.kind === 'admin' ? 'Admin' : 'Game'}</td>
+                        <td>${t.kind === 'game' ? escapeHtml(t.game) : '<span class="muted">all (management)</span>'}</td>
+                        <td><code>${escapeHtml(t.prefix)}\u2026</code></td>
+                        <td class="date">${escapeHtml(when(t.created_at))}</td>
+                        <td class="date">${escapeHtml(when(t.last_used_at))}</td>
+                        <td><span class="pill ${t.revoked ? 'unclaimed' : 'claimed'}">${t.revoked ? 'revoked' : 'active'}</span></td>
+                        <td class="actions">${t.revoked ? '' : `<button class="danger" data-revoke="${t.id}" data-name="${escapeHtml(t.name)}">Revoke</button>`}</td>
+                    </tr>`).join('') || '<tr><td colspan="8" class="muted">No tokens yet.</td></tr>';
+            } catch (err) { /* ignore */ }
+        }
+
+        el('t-kind').addEventListener('change', () => { el('t-game').classList.toggle('hidden', el('t-kind').value !== 'game'); });
+
+        el('token-form').addEventListener('submit', async (ev) => {
+            ev.preventDefault();
+            const msg = el('token-message');
+            try {
+                const res = await fetch('/admin/api/tokens', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: el('t-name').value,
+                        kind: el('t-kind').value,
+                        game: el('t-kind').value === 'game' ? el('t-game').value : null,
+                    }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(describe(data));
+                msg.classList.add('hidden');
+                el('token-value').textContent = data.token;
+                el('token-note').textContent = data.kind === 'game'
+                    ? 'Game token for "' + data.game + '". Keep it in your game server\u2019s secrets, never in browser code.'
+                    : 'Admin token. Anyone holding it can manage scores, games and events through the API.';
+                el('token-reveal').classList.remove('hidden');
+                el('token-form').reset();
+                el('t-game').classList.remove('hidden');
+                await loadTokens();
+            } catch (err) {
+                msg.textContent = 'Could not create token: ' + err.message;
+                msg.classList.remove('hidden');
+                msg.classList.add('error');
+            }
+        });
+
+        async function copyText(text, button) {
+            const original = button.textContent;
+            try { await navigator.clipboard.writeText(text); button.textContent = 'Copied \u2713'; }
+            catch (err) { window.prompt('Copy this:', text); }
+            setTimeout(() => { button.textContent = original; }, 1500);
+        }
+        el('copy-token').addEventListener('click', (ev) => copyText(el('token-value').textContent, ev.target));
+        el('copy-base').addEventListener('click', (ev) => copyText(window.location.origin, ev.target));
+        el('dismiss-token').addEventListener('click', () => { el('token-value').textContent = ''; el('token-reveal').classList.add('hidden'); });
+
+        el('token-rows').addEventListener('click', async (ev) => {
+            const id = ev.target.getAttribute('data-revoke');
+            if (!id) return;
+            if (!window.confirm('Revoke "' + ev.target.getAttribute('data-name') + '"? Anything using it stops working immediately.')) return;
+            await fetch('/admin/api/tokens/' + id, { method: 'DELETE', credentials: 'same-origin' });
+            await loadTokens();
+        });
+
+        load().then(loadEvents).then(loadGames).then(loadTokens);
     </script>
 </body>
 </html>
