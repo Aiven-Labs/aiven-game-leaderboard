@@ -2,6 +2,7 @@ from fastapi import Depends, FastAPI, Form, Header, HTTPException, Request, Resp
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+import segno
 from datetime import datetime, timezone
 import asyncio
 import csv
@@ -1272,15 +1273,76 @@ async def admin_list_scores():
         raise HTTPException(status_code=500, detail="Failed to list scores")
 
 
+# Where players and slide-deck QR codes point. inkless.dev serves /e/<slug> for every event
+# (a wildcard redirect to the game with the event and UTM tags), so a new event needs no code.
+PUBLIC_GAME_URL = os.getenv("PUBLIC_GAME_URL", "https://inkless.dev").rstrip("/")
+
+
+def _origin(request: Request) -> str:
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme).split(",")[0].strip()
+    host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc).split(",")[0].strip()
+    return f"{proto}://{host}"
+
+
+def _event_links(slug: str, request: Request) -> dict:
+    return {
+        "game": f"{PUBLIC_GAME_URL}/e/{slug}",
+        "leaderboard": f"{PUBLIC_GAME_URL}/e/{slug}/leaderboard",
+        # The arcade cabinet's browser is pointed here once; it plays at this event from then on
+        "cabinet": f"{_origin(request)}/qrcode/?event={slug}",
+    }
+
+
+def _event_status(e: dict) -> str:
+    now = datetime.utcnow()
+    if e["starts_at"] and now < e["starts_at"]:
+        return "upcoming"
+    if e["ends_at"] and now > e["ends_at"]:
+        return "closed"
+    return "open"
+
+
 @app.get("/admin/api/events", dependencies=[Depends(require_admin)])
-async def admin_list_events():
+async def admin_list_events(request: Request):
     events = await database.list_events()
     return {"events": [
         {"slug": e["slug"], "name": e["name"],
          "starts_at": e["starts_at"].isoformat() if e["starts_at"] else None,
-         "ends_at": e["ends_at"].isoformat() if e["ends_at"] else None}
+         "ends_at": e["ends_at"].isoformat() if e["ends_at"] else None,
+         "status": _event_status(e),
+         "links": _event_links(e["slug"], request)}
         for e in events
     ]}
+
+
+@app.get("/admin/api/events/{slug}/qr", dependencies=[Depends(require_admin)])
+async def admin_event_qr(slug: str, request: Request, kind: str = "game", format: str = "png"):
+    """A QR code for one of an event's links, ready for a slide or poster.
+
+    kind: game (players' phones), leaderboard (the event's board) or cabinet (the arcade URL).
+    High error correction, so it still scans when projected or printed small."""
+    if not EVENT_SLUG_RE.match(slug):
+        raise HTTPException(status_code=400, detail="bad event slug")
+    if kind not in ("game", "leaderboard", "cabinet") or format not in ("png", "svg"):
+        raise HTTPException(status_code=400, detail="kind must be game, leaderboard or cabinet; format png or svg")
+    events = await database.list_events()
+    if slug not in {e["slug"] for e in events}:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    url = _event_links(slug, request)[kind]
+    buffer = io.BytesIO()
+    qr = segno.make(url, error="h", micro=False)
+    if format == "svg":
+        qr.save(buffer, kind="svg", scale=10, border=4, xmldecl=False)
+        media = "image/svg+xml"
+    else:
+        qr.save(buffer, kind="png", scale=16, border=4)
+        media = "image/png"
+    return Response(
+        content=buffer.getvalue(),
+        media_type=media,
+        headers={"Content-Disposition": f'inline; filename="{slug}-{kind}.{format}"', "Cache-Control": "no-store"},
+    )
 
 
 @app.put("/admin/api/events/{slug}", dependencies=[Depends(require_admin)])

@@ -159,6 +159,10 @@
         .gate-error { color: #FF6B6B; font-size: 0.9em; margin-top: 12px; min-height: 1.4em; }
 
         .hidden { display: none !important; }
+        .link-buttons button { display: block; margin: 0 0 6px; width: 100%; text-align: left; }
+        .qr-cell { white-space: nowrap; }
+        .qr-item { display: inline-flex; align-items: center; gap: 8px; margin-right: 14px; vertical-align: top; }
+        .qr-item img { background: #fff; border-radius: 4px; padding: 2px; }
     </style>
 </head>
 <body>
@@ -217,11 +221,11 @@
 
             <div class="header" style="margin-top:28px">
                 <h1 style="font-size:1.1em">Events</h1>
-                <span class="muted">Each event has its own leaderboard. A cabinet or QR link names its event with <code>?event=slug</code>. Times are UTC; leave blank for always open.</span>
+                <span class="muted"><strong>To add an event:</strong> fill in the form below and save. Its game link, leaderboard link, arcade-cabinet URL and QR codes appear in the table, ready to paste into slides or posters. Each event keeps its own leaderboard, so events can run on the same dates. Times are UTC; leave them blank for always open.</span>
             </div>
             <div class="table-wrap">
                 <table>
-                    <thead><tr><th>Slug</th><th>Name</th><th>Opens (UTC)</th><th>Closes (UTC)</th><th></th></tr></thead>
+                    <thead><tr><th>Event</th><th>Window (UTC)</th><th>Status</th><th>Links (click to copy)</th><th>QR codes</th><th></th></tr></thead>
                     <tbody id="event-rows"></tbody>
                 </table>
             </div>
@@ -491,14 +495,31 @@
         function utcLocal(iso) { return iso ? iso.slice(0, 16) : ''; }
 
         function renderEvents() {
+            const qr = (e, kind, label) => {
+                const base = '/admin/api/events/' + encodeURIComponent(e.slug) + '/qr?kind=' + kind;
+                return `<div class="qr-item">
+                    <img src="${base}&format=png" alt="${label} QR" width="72" height="72">
+                    <div><strong>${label}</strong><br>
+                        <a href="${base}&format=png" download="${escapeHtml(e.slug)}-${kind}.png">PNG</a> ·
+                        <a href="${base}&format=svg" download="${escapeHtml(e.slug)}-${kind}.svg">SVG</a></div>
+                </div>`;
+            };
+            const copy = (url, label) =>
+                `<button class="secondary" data-copy="${escapeHtml(url)}" title="${escapeHtml(url)}">${label}</button>`;
+
             el('event-rows').innerHTML = events.map((e) => `
                 <tr>
-                    <td>${escapeHtml(e.slug)}</td>
-                    <td>${escapeHtml(e.name)}</td>
-                    <td class="date">${escapeHtml(utcLocal(e.starts_at)) || 'always'}</td>
-                    <td class="date">${escapeHtml(utcLocal(e.ends_at)) || 'never'}</td>
+                    <td><strong>${escapeHtml(e.name)}</strong><br><span class="muted">${escapeHtml(e.slug)}</span></td>
+                    <td class="date">${escapeHtml(utcLocal(e.starts_at)) || 'always'}<br>${escapeHtml(utcLocal(e.ends_at)) || 'never ends'}</td>
+                    <td><span class="pill ${e.status === 'open' ? 'claimed' : 'unclaimed'}">${escapeHtml(e.status)}</span></td>
+                    <td class="link-buttons">
+                        ${copy(e.links.game, 'Game link')}
+                        ${copy(e.links.leaderboard, 'Leaderboard link')}
+                        ${copy(e.links.cabinet, 'Cabinet URL')}
+                    </td>
+                    <td class="qr-cell">${qr(e, 'game', 'Game')}${qr(e, 'leaderboard', 'Leaderboard')}</td>
                     <td class="actions"><button class="secondary" data-edit="${escapeHtml(e.slug)}">Edit</button></td>
-                </tr>`).join('') || '<tr><td colspan="5" class="muted">No events yet.</td></tr>';
+                </tr>`).join('') || '<tr><td colspan="6" class="muted">No events yet.</td></tr>';
 
             const filter = el('event-filter');
             const keep = filter.value;
@@ -514,7 +535,15 @@
             } catch (err) { /* the scores table still works without it */ }
         }
 
-        el('event-rows').addEventListener('click', (ev) => {
+        el('event-rows').addEventListener('click', async (ev) => {
+            const url = ev.target.getAttribute('data-copy');
+            if (url) {
+                const original = ev.target.textContent;
+                try { await navigator.clipboard.writeText(url); ev.target.textContent = 'Copied \u2713'; }
+                catch (err) { window.prompt('Copy this link:', url); }
+                setTimeout(() => { ev.target.textContent = original; }, 1500);
+                return;
+            }
             const slug = ev.target.getAttribute('data-edit');
             const e = events.find((x) => x.slug === slug);
             if (!e) return;
