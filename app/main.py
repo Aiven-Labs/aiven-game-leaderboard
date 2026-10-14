@@ -2,7 +2,7 @@ from fastapi import Depends, FastAPI, Form, Header, HTTPException, Request, Resp
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from datetime import datetime
+from datetime import datetime, timezone
 import asyncio
 import csv
 import hashlib
@@ -11,11 +11,13 @@ import io
 import json
 import logging
 import os
+import re
 import time
 from contextlib import asynccontextmanager
 
 from .database import database
 from .models import (
+    EventUpsert,
     ScoreSubmission,
     ClaimData,
     ScoreResponse,
@@ -185,7 +187,8 @@ async def submit_score(score: ScoreSubmission, x_ingest_secret: str | None = Hea
             score.final_bill, 
             score.total_savings, 
             score.timestamp,
-            score.source
+            score.source,
+            score.event
         )
         
         logger.info(f"Score submitted for session {score.session_id}: bill=${score.final_bill}, savings=${score.total_savings}")
@@ -988,7 +991,7 @@ async def claim_score(session_id: str, claim_data: ClaimData):
             raise HTTPException(status_code=400, detail=f"Score has already been claimed")
         
         # Check if nickname is already taken by a different email
-        existing_user = await database.get_user_by_nickname(claim_data.nickname)
+        existing_user = await database.get_user_by_nickname(claim_data.nickname, score['event'])
         if existing_user:
             if existing_user['email'].lower() != claim_data.email.lower():
                 raise HTTPException(status_code=400, detail=f"Nickname '{claim_data.nickname}' is already taken. Please choose another.")
@@ -1018,17 +1021,45 @@ async def claim_score(session_id: str, claim_data: ClaimData):
         logger.error(f"Error claiming score: {e}")
         raise HTTPException(status_code=500, detail="Failed to claim score")
 
+EVENT_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
+
+
+@app.get("/api/events")
+async def list_events():
+    """Events with a board of their own, for the leaderboard page's picker"""
+    try:
+        events = await database.list_events()
+        return {"events": [
+            {
+                "slug": e["slug"],
+                "name": e["name"],
+                "starts_at": e["starts_at"].isoformat() if e["starts_at"] else None,
+                "ends_at": e["ends_at"].isoformat() if e["ends_at"] else None,
+            }
+            for e in events
+        ]}
+    except Exception as e:
+        logger.error(f"Error listing events: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list events")
+
+
 @app.get("/api/leaderboard")
-async def get_leaderboard(limit: int = 10, source: str = "all"):
+async def get_leaderboard(limit: int = 10, source: str = "all", event: str = "all"):
     """Get the leaderboard showing only claimed scores with nicknames.
 
     `source` filters by where the score was played: "arcade", "web" or "all".
+    `event` picks one event's board by slug, "none" for scores played at no event, or "all".
     """
     if source not in ("all", "arcade", "web"):
         raise HTTPException(status_code=400, detail="source must be all, arcade or web")
+    if event not in ("all", "none") and not EVENT_SLUG_RE.match(event):
+        raise HTTPException(status_code=400, detail="event must be all, none or an event slug")
     try:
-        logger.info(f"Getting leaderboard (source={source})")
-        all_scores = await database.get_leaderboard(source=None if source == "all" else source)
+        logger.info(f"Getting leaderboard (source={source}, event={event})")
+        all_scores = await database.get_leaderboard(
+            source=None if source == "all" else source,
+            event=None if event == "all" else event,
+        )
         
         # Filter to only include claimed scores (those with nicknames and emails)
         claimed_scores = []
@@ -1057,6 +1088,7 @@ async def get_leaderboard(limit: int = 10, source: str = "all"):
                 "nickname": score.get('nickname', 'Anonymous'),
                 "timestamp": score['timestamp'].isoformat(),
                 "source": score.get('source', 'arcade'),
+                "event": score.get('event'),
                 "claimed": True  # All these are claimed by definition
             }
             
@@ -1068,7 +1100,7 @@ async def get_leaderboard(limit: int = 10, source: str = "all"):
             leaderboard.append(entry)
         
         logger.info(f"Returning {len(leaderboard)} claimed scores for leaderboard")
-        return {"leaderboard": leaderboard, "ranked_by": "total_savings", "source": source}
+        return {"leaderboard": leaderboard, "ranked_by": "total_savings", "source": source, "event": event}
         
     except Exception as e:
         logger.error(f"Error getting leaderboard: {e}")
@@ -1227,6 +1259,7 @@ async def admin_list_scores():
                     "final_bill": row["final_bill"],
                     "claimed": bool(row["email"]),
                     "source": row["source"],
+                    "event": row["event"],
                     "played_at": row["timestamp"].isoformat() if row["timestamp"] else None,
                     "claimed_at": row["claimed_at"].isoformat() if row["claimed_at"] else None,
                 }
@@ -1237,6 +1270,37 @@ async def admin_list_scores():
     except Exception as e:
         logger.error(f"Error listing scores for admin: {e}")
         raise HTTPException(status_code=500, detail="Failed to list scores")
+
+
+@app.get("/admin/api/events", dependencies=[Depends(require_admin)])
+async def admin_list_events():
+    events = await database.list_events()
+    return {"events": [
+        {"slug": e["slug"], "name": e["name"],
+         "starts_at": e["starts_at"].isoformat() if e["starts_at"] else None,
+         "ends_at": e["ends_at"].isoformat() if e["ends_at"] else None}
+        for e in events
+    ]}
+
+
+@app.put("/admin/api/events/{slug}", dependencies=[Depends(require_admin)])
+async def admin_upsert_event(slug: str, event: EventUpsert):
+    """Create an event or edit its name and window. Times are UTC; leave them out for always-open"""
+    if not EVENT_SLUG_RE.match(slug):
+        raise HTTPException(status_code=400, detail="slug must be lowercase letters, numbers and hyphens")
+
+    def naive_utc(dt):
+        if dt is None:
+            return None
+        return dt.astimezone(timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
+
+    try:
+        await database.upsert_event(slug, event.name, naive_utc(event.starts_at), naive_utc(event.ends_at))
+        logger.info(f"Admin saved event {slug}")
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"Error saving event {slug}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save event")
 
 
 @app.patch("/admin/api/scores/{session_id}", dependencies=[Depends(require_admin)])
@@ -1283,10 +1347,14 @@ async def admin_delete_score(session_id: str):
 
 
 @app.get("/admin/export.csv", dependencies=[Depends(require_admin)])
-async def admin_export_csv(claimed_only: bool = False):
-    """Download every score as CSV, for spreadsheets and follow-up"""
+async def admin_export_csv(claimed_only: bool = False, event: str = "all"):
+    """Download scores as CSV, for spreadsheets and follow-up. ?event=<slug> exports one event's entrants (for its prize draw)"""
     try:
         rows = await database.get_all_scores_admin()
+        if event == "none":
+            rows = [r for r in rows if not r["event"]]
+        elif event != "all":
+            rows = [r for r in rows if r["event"] == event]
 
         buffer = io.StringIO()
         writer = csv.writer(buffer)
@@ -1300,6 +1368,7 @@ async def admin_export_csv(claimed_only: bool = False):
                 "final_bill",
                 "claimed",
                 "source",
+                "event",
                 "played_at",
                 "claimed_at",
                 "session_id",
@@ -1321,6 +1390,7 @@ async def admin_export_csv(claimed_only: bool = False):
                     row["final_bill"],
                     "yes" if row["email"] else "no",
                     row["source"],
+                    row["event"] or "",
                     row["timestamp"].isoformat() if row["timestamp"] else "",
                     row["claimed_at"].isoformat() if row["claimed_at"] else "",
                     row["session_id"],

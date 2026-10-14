@@ -94,6 +94,34 @@ class Database:
                 ALTER TABLE scores ADD COLUMN IF NOT EXISTS source VARCHAR(10) NOT NULL DEFAULT 'arcade';
             """)
 
+            # Which event a score was played at (events.slug), or NULL for none
+            await conn.execute("""
+                ALTER TABLE scores ADD COLUMN IF NOT EXISTS event VARCHAR(40);
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_event ON scores(event) WHERE event IS NOT NULL;
+            """)
+
+            # Events run side by side (two on the same dates is fine), so a score is tagged with
+            # its event when it is played rather than inferred from the date. The window, if
+            # set, only stops late plays being tagged to a finished event.
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS events (
+                    slug VARCHAR(40) PRIMARY KEY,
+                    name VARCHAR(100) NOT NULL,
+                    starts_at TIMESTAMP,
+                    ends_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            # Starter events; names and dates are editable in the admin console and never overwritten
+            await conn.execute("""
+                INSERT INTO events (slug, name) VALUES
+                    ('ato-2026', 'All Things Open 2026'),
+                    ('pgconf-2026', 'PGConf 2026')
+                ON CONFLICT (slug) DO NOTHING;
+            """)
+
             # Create indexes for better performance
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_session_id ON scores(session_id);
@@ -114,17 +142,30 @@ class Database:
             
         logger.info("Database tables created/verified")
 
-    async def submit_score(self, session_id: str, final_bill: int, total_savings: int, timestamp: str, source: str = 'arcade'):
+    async def submit_score(self, session_id: str, final_bill: int, total_savings: int, timestamp: str, source: str = 'arcade', event: str = None):
         """Submit a new score to the database"""
         async with self.pool.acquire() as conn:
+            # Only tag the score if the event exists and is open right now; otherwise it is
+            # still saved, just not on any event board
+            if event:
+                open_event = await conn.fetchval("""
+                    SELECT slug FROM events
+                    WHERE slug = $1
+                      AND (starts_at IS NULL OR starts_at <= (NOW() AT TIME ZONE 'UTC'))
+                      AND (ends_at IS NULL OR ends_at >= (NOW() AT TIME ZONE 'UTC'))
+                """, event)
+                if not open_event:
+                    logger.info(f"Score {session_id}: event '{event}' unknown or closed, saving untagged")
+                    event = None
+
             # For simplicity, just use current UTC time
             # The client timestamp is informational but we'll use server time for consistency
             dt = datetime.utcnow()
             
             await conn.execute("""
-                INSERT INTO scores (session_id, final_bill, total_savings, timestamp, source)
-                VALUES ($1, $2, $3, $4, $5)
-            """, session_id, final_bill, total_savings, dt, source)
+                INSERT INTO scores (session_id, final_bill, total_savings, timestamp, source, event)
+                VALUES ($1, $2, $3, $4, $5, $6)
+            """, session_id, final_bill, total_savings, dt, source, event)
 
     async def get_score(self, session_id: str):
         """Get a score by session ID"""
@@ -133,12 +174,15 @@ class Database:
                 SELECT * FROM scores WHERE session_id = $1
             """, session_id)
     
-    async def get_user_by_nickname(self, nickname: str):
-        """Get user info by nickname"""
+    async def get_user_by_nickname(self, nickname: str, event: str = None):
+        """Get user info by nickname, within one event (nicknames only need to be unique per board)"""
         async with self.pool.acquire() as conn:
             return await conn.fetchrow(
-                "SELECT email, nickname FROM scores WHERE nickname = $1 AND email IS NOT NULL LIMIT 1",
-                nickname
+                """SELECT email, nickname FROM scores
+                   WHERE nickname = $1 AND email IS NOT NULL
+                     AND event IS NOT DISTINCT FROM $2
+                   LIMIT 1""",
+                nickname, event
             )
 
     async def claim_score(self, session_id: str, email: str, nickname: str, company: str = None):
@@ -196,7 +240,7 @@ class Database:
         async with self.pool.acquire() as conn:
             # Get the score details
             score_row = await conn.fetchrow("""
-                SELECT final_bill, total_savings FROM scores WHERE session_id = $1
+                SELECT final_bill, total_savings, event FROM scores WHERE session_id = $1
             """, session_id)
             
             if not score_row:
@@ -208,14 +252,16 @@ class Database:
                 FROM scores 
                 WHERE total_savings > $1
                 AND email IS NOT NULL
-            """, score_row['total_savings'])
+                AND event IS NOT DISTINCT FROM $2
+            """, score_row['total_savings'], score_row['event'])
             
             # Get total number of CLAIMED scores
             total_row = await conn.fetchrow("""
                 SELECT COUNT(*) as total 
                 FROM scores 
                 WHERE email IS NOT NULL
-            """)
+                AND event IS NOT DISTINCT FROM $1
+            """, score_row['event'])
             
             rank = rank_row['rank']
             total = total_row['total']
@@ -224,12 +270,13 @@ class Database:
             is_high_score = rank <= max(1, total * 0.1) if total > 0 else False
             
             return {
+                'event': score_row['event'],
                 'is_high_score': is_high_score,
                 'rank': rank,
                 'total_scores': total
             }
 
-    async def get_leaderboard(self, limit: int = None, source: str = None):
+    async def get_leaderboard(self, limit: int = None, source: str = None, event: str = None):
         """Get all scores for leaderboard (claimed and unclaimed)"""
         async with self.pool.acquire() as conn:
             # Check if nickname and company columns exist first
@@ -252,7 +299,8 @@ class Database:
                     "email",
                     "timestamp",
                     "claimed_at",
-                    "source"
+                    "source",
+                    "event"
                 ]
                 
                 if nickname_exists:
@@ -262,7 +310,17 @@ class Database:
                 
                 select_clause = ", ".join(select_fields)
                 
-                where = "WHERE source = $1" if source else ""
+                # event: None = every score; "none" = scores with no event; otherwise one event's board
+                clauses, args = [], []
+                if source:
+                    args.append(source)
+                    clauses.append(f"source = ${len(args)}")
+                if event == "none":
+                    clauses.append("event IS NULL")
+                elif event:
+                    args.append(event)
+                    clauses.append(f"event = ${len(args)}")
+                where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
                 query = f"""
                     SELECT 
                         {select_clause},
@@ -275,7 +333,7 @@ class Database:
                 if limit:
                     query += f" LIMIT {int(limit)}"
                     
-                rows = await conn.fetch(query, source) if source else await conn.fetch(query)
+                rows = await conn.fetch(query, *args)
                 
                 # Convert to list of dictionaries and ensure all expected fields exist
                 result = []
@@ -332,11 +390,26 @@ class Database:
                     company,
                     claimed_at,
                     created_at,
-                    source
+                    source,
+                    event
                 FROM scores
                 ORDER BY total_savings DESC
             """)
             return [dict(row) for row in rows]
+
+    async def list_events(self):
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("SELECT slug, name, starts_at, ends_at FROM events ORDER BY created_at, slug")
+            return [dict(r) for r in rows]
+
+    async def upsert_event(self, slug: str, name: str, starts_at, ends_at):
+        """Create an event or edit its name and window (naive UTC datetimes)"""
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO events (slug, name, starts_at, ends_at) VALUES ($1, $2, $3, $4)
+                ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name,
+                    starts_at = EXCLUDED.starts_at, ends_at = EXCLUDED.ends_at
+            """, slug, name, starts_at, ends_at)
 
     async def admin_update_score(self, session_id: str, nickname, company, email):
         """Update the player-supplied fields of a score.

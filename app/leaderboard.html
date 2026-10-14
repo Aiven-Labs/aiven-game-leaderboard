@@ -191,7 +191,7 @@
                 font-size: 0.85em;
             }
             
-            .date {
+            .date, .date-header {
                 display: none;
             }
         }
@@ -209,7 +209,7 @@
                 font-size: 0.8em;
             }
             
-            .date, .company {
+            .date, .company, .date-header, .company-header {
                 display: none;
             }
             
@@ -224,6 +224,7 @@
 
         .filters {
             display: flex;
+            flex-wrap: wrap;
             justify-content: center;
             gap: 8px;
             margin: 0 0 18px;
@@ -237,6 +238,16 @@
             font-size: 14px;
             font-family: inherit;
             cursor: pointer;
+        }
+        .event-select {
+            max-width: 100%;
+            background: #1a1a1a;
+            color: #ffffff;
+            border: 1px solid #444444;
+            border-radius: 999px;
+            padding: 8px 14px;
+            font-size: 14px;
+            font-family: inherit;
         }
         .filter-btn.active {
             background: #FF6B35;
@@ -257,6 +268,9 @@
             <button class="filter-btn" data-source="all" onclick="setSource('all')">All</button>
             <button class="filter-btn" data-source="arcade" onclick="setSource('arcade')">Arcade</button>
             <button class="filter-btn" data-source="web" onclick="setSource('web')">Web</button>
+            <select id="event-select" class="event-select" aria-label="Event" onchange="setEvent(this.value)">
+                <option value="all">All events</option>
+            </select>
         </div>
 
         <div class="leaderboard">
@@ -268,7 +282,7 @@
                 <div class="leaderboard-header">
                     <div>Rank</div>
                     <div>Player</div>
-                    <div>Company</div>
+                    <div class="company-header">Company</div>
                     <div>Saved</div>
                     <div>Final Bill</div>
                     <div class="date-header">Date</div>
@@ -330,6 +344,51 @@
             return 'all';
         })();
 
+        // Which event's board: "all", "none" (no event) or an event slug. ?event=pgconf-2026 links
+        // straight to one event's board, which is what booths and slide-deck QR codes use.
+        let currentEvent = (function () {
+            const fromUrl = new URLSearchParams(window.location.search).get('event');
+            return fromUrl && /^(all|none|[a-z0-9][a-z0-9-]{0,39})$/.test(fromUrl) ? fromUrl : 'all';
+        })();
+
+        async function loadEvents() {
+            const select = document.getElementById('event-select');
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/events`);
+                if (res.ok) {
+                    const { events } = await res.json();
+                    events.forEach(function (e) {
+                        const opt = document.createElement('option');
+                        opt.value = e.slug;
+                        opt.textContent = e.name;
+                        select.appendChild(opt);
+                    });
+                    const noEvent = document.createElement('option');
+                    noEvent.value = 'none';
+                    noEvent.textContent = 'No event';
+                    select.appendChild(noEvent);
+                    // Heading names the event when one is chosen
+                    window.__eventNames = Object.fromEntries(events.map(function (e) { return [e.slug, e.name]; }));
+                }
+            } catch (e) { /* picker just stays on "All events" */ }
+            select.value = currentEvent;
+            if (select.value !== currentEvent) { currentEvent = 'all'; select.value = 'all'; }
+        }
+
+        function setEvent(event) {
+            currentEvent = event;
+            const url = new URL(window.location.href);
+            if (event === 'all') url.searchParams.delete('event'); else url.searchParams.set('event', event);
+            window.history.replaceState(null, '', url);
+            loadLeaderboard();
+        }
+
+        function updateHeading() {
+            const names = window.__eventNames || {};
+            const h1 = document.querySelector('.header h1');
+            if (h1) h1.textContent = '\u{1F3C6} ' + (names[currentEvent] ? names[currentEvent] + ' Leaderboard' : 'Leaderboard');
+        }
+
         function updateFilterButtons() {
             document.querySelectorAll('.filter-btn').forEach(function (b) {
                 b.classList.toggle('active', b.dataset.source === currentSource);
@@ -345,6 +404,7 @@
 
         async function loadLeaderboard() {
             updateFilterButtons();
+            updateHeading();
             const loading = document.getElementById('loading');
             const content = document.getElementById('content');
             const error = document.getElementById('error');
@@ -356,7 +416,7 @@
             error.style.display = 'none';
 
             try {
-                const response = await fetch(`${API_BASE_URL}/api/leaderboard?limit=20&source=${currentSource}`);
+                const response = await fetch(`${API_BASE_URL}/api/leaderboard?limit=20&source=${currentSource}&event=${currentEvent}`);
                 
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -405,7 +465,7 @@
         }
 
         // Load leaderboard on page load
-        document.addEventListener('DOMContentLoaded', loadLeaderboard);
+        document.addEventListener('DOMContentLoaded', function () { loadEvents().then(loadLeaderboard); });
 
         // Auto-refresh every 30 seconds
         setInterval(loadLeaderboard, 30000);

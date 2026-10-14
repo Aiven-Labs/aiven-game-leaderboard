@@ -10,6 +10,19 @@ class ScoreSubmission(BaseModel):
     timestamp: str
     # Older clients do not send this; every score they produced came from the arcade
     source: Literal['arcade', 'web'] = 'arcade'
+    # Which event this was played at (a slug from the events table), if any
+    event: Optional[str] = None
+
+    @validator('event')
+    def clean_event(cls, v):
+        if v is None:
+            return None
+        v = v.strip().lower()
+        if not v:
+            return None
+        if not re.match(r'^[a-z0-9][a-z0-9-]{0,39}$', v):
+            raise ValueError('invalid event')
+        return v
 
 class ClaimData(BaseModel):
     email: EmailStr
@@ -108,6 +121,7 @@ class ScoreResponse(BaseModel):
     message: str
 
 class HighScoreCheck(BaseModel):
+    event: Optional[str] = None
     is_high_score: bool
     rank: Optional[int] = None
     total_scores: Optional[int] = None
@@ -117,3 +131,16 @@ class ClaimResponse(BaseModel):
     message: str
     is_high_score: Optional[bool] = None
     rank: Optional[int] = None
+
+class EventUpsert(BaseModel):
+    """Create or edit an event. The window is optional: with no dates the event is always open."""
+    name: str
+    starts_at: Optional[datetime] = None
+    ends_at: Optional[datetime] = None
+
+    @validator('name')
+    def name_ok(cls, v):
+        v = v.strip()
+        if not 1 <= len(v) <= 100:
+            raise ValueError('Name must be 1-100 characters')
+        return v
