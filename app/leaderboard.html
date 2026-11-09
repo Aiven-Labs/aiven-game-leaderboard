@@ -377,8 +377,10 @@
 
         function setGame(game) {
             currentGame = game;
+            renderEventOptions();
             const url = new URL(window.location.href);
             url.searchParams.set('game', game);
+            if (currentEvent === 'all') url.searchParams.delete('event'); else url.searchParams.set('event', currentEvent);
             window.history.replaceState(null, '', url);
             loadLeaderboard();
         }
@@ -390,28 +392,37 @@
             return fromUrl && /^(all|none|[a-z0-9][a-z0-9-]{0,39})$/.test(fromUrl) ? fromUrl : 'all';
         })();
 
-        async function loadEvents() {
+        let eventList = [];
+
+        // The picker only offers events that run the current game
+        function renderEventOptions() {
             const select = document.getElementById('event-select');
+            select.innerHTML = '';
+            const add = function (value, label) {
+                const opt = document.createElement('option');
+                opt.value = value;
+                opt.textContent = label;
+                select.appendChild(opt);
+            };
+            add('all', 'All events');
+            eventList
+                .filter(function (e) { return !e.games || e.games.includes(currentGame); })
+                .forEach(function (e) { add(e.slug, e.name); });
+            add('none', 'No event');
+            select.value = currentEvent;
+            if (select.value !== currentEvent) { currentEvent = 'all'; select.value = 'all'; }
+        }
+
+        async function loadEvents() {
             try {
                 const res = await fetch(`${API_BASE_URL}/api/events`);
                 if (res.ok) {
-                    const { events } = await res.json();
-                    events.forEach(function (e) {
-                        const opt = document.createElement('option');
-                        opt.value = e.slug;
-                        opt.textContent = e.name;
-                        select.appendChild(opt);
-                    });
-                    const noEvent = document.createElement('option');
-                    noEvent.value = 'none';
-                    noEvent.textContent = 'No event';
-                    select.appendChild(noEvent);
+                    eventList = (await res.json()).events;
                     // Heading names the event when one is chosen
-                    window.__eventNames = Object.fromEntries(events.map(function (e) { return [e.slug, e.name]; }));
+                    window.__eventNames = Object.fromEntries(eventList.map(function (e) { return [e.slug, e.name]; }));
                 }
             } catch (e) { /* picker just stays on "All events" */ }
-            select.value = currentEvent;
-            if (select.value !== currentEvent) { currentEvent = 'all'; select.value = 'all'; }
+            renderEventOptions();
         }
 
         function setEvent(event) {
@@ -518,7 +529,7 @@
         }
 
         // Load leaderboard on page load
-        document.addEventListener('DOMContentLoaded', function () { Promise.all([loadGames(), loadEvents()]).then(loadLeaderboard); });
+        document.addEventListener('DOMContentLoaded', function () { Promise.all([loadGames(), loadEvents()]).then(function () { renderEventOptions(); loadLeaderboard(); }); });
 
         // Auto-refresh every 30 seconds
         setInterval(loadLeaderboard, 30000);

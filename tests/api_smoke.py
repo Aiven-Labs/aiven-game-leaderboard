@@ -160,6 +160,80 @@ check("an admin token cannot mint tokens", st == 401, st)
 st, _, _ = call("DELETE", "/api/v1/admin/scores/smoke-sr-0011", headers=bearer(admin_token), jar=False)
 check("admin token can delete a score", st == 200, st)
 
+print("== events with several games")
+st, _, _ = call("PUT", "/admin/api/games/smoke-speedrun", {
+    "name": "Smoke Speedrun", "score_label": "Time", "score_format": "time_ms", "sort_order": "asc",
+    "secondary_label": "Level", "secondary_format": "int", "highscore_text": "Fast! {score}",
+    "play_url": "https://speedrun.example/play?mode=arcade", "cabinet_url": "https://speedrun.example/cab/{event}"})
+check("a game can have play and cabinet URLs", st == 200, st)
+st, _, _ = call("PUT", "/admin/api/games/smoke-speedrun", {"name": "Smoke Speedrun", "score_label": "Time",
+    "score_format": "time_ms", "sort_order": "asc", "secondary_label": "Level", "secondary_format": "int",
+    "highscore_text": "Fast! {score}"})
+st, body, _ = call("GET", "/api/v1/games", jar=False)
+sr = next(g for g in body["games"] if g["slug"] == "smoke-speedrun")
+check("saving a game without URLs keeps them", sr["play_url"] == "https://speedrun.example/play?mode=arcade"
+      and sr["cabinet_url"] == "https://speedrun.example/cab/{event}", sr)
+st, _, _ = call("PUT", "/admin/api/games/smoke-speedrun", {**{k: sr[k] for k in ("name", "score_label",
+    "score_format", "sort_order", "secondary_label", "secondary_format", "highscore_text")}, "play_url": "javascript:alert(1)"})
+check("a non-http play URL is a 422", st == 422, st)
+di = next(g for g in body["games"] if g["slug"] == "disk-invaders")
+check("Disk Invaders gets its inkless.dev play URL", (di["play_url"] or "").endswith("/e/{event}"), di)
+
+st, body, _ = call("PUT", "/admin/api/events/smoke-conf", {"name": "Smoke Conf", "games": ["disk-invaders", "smoke-speedrun"]})
+check("create an event with two games", st == 200, (st, body))
+st, body, _ = call("PUT", "/admin/api/events/smoke-bad", {"name": "Bad", "games": ["no-such-game"]})
+check("an event with an unknown game is a 404", st == 404 and "no-such-game" in body.get("detail", ""), (st, body))
+st, body, _ = call("GET", "/admin/api/events")
+ev = next((e for e in body["events"] if e["slug"] == "smoke-conf"), None)
+boards = {b["game"]: b["links"] for b in (ev or {}).get("boards", [])}
+check("the event lists both games, one board each", ev and ev["games"] == ["disk-invaders", "smoke-speedrun"]
+      and set(boards) == {"disk-invaders", "smoke-speedrun"}, ev)
+check("play link appends ?event= when there is no {event}",
+      boards.get("smoke-speedrun", {}).get("game") == "https://speedrun.example/play?mode=arcade&event=smoke-conf", boards)
+check("cabinet link fills {event}", boards.get("smoke-speedrun", {}).get("cabinet") == "https://speedrun.example/cab/smoke-conf")
+check("Disk Invaders play link fills {event}", (boards.get("disk-invaders", {}).get("game") or "").endswith("/e/smoke-conf"))
+check("each board links to its own game's event board",
+      "game=smoke-speedrun&event=smoke-conf" in boards.get("smoke-speedrun", {}).get("leaderboard", ""))
+check("a game with no cabinet URL has no cabinet link", boards.get("disk-invaders", {}).get("cabinet") is None)
+check("starter events were given Disk Invaders",
+      all(e["games"] == ["disk-invaders"] for e in body["events"] if e["slug"] in ("ato-2026", "pgconf-2026")))
+
+st, _, raw = call("GET", "/admin/api/events/smoke-conf/qr?game=smoke-speedrun&kind=game&format=png")
+check("QR code for one game's play link", st == 200 and raw[:4] == b"\x89PNG", st)
+st, _, raw = call("GET", "/admin/api/events/smoke-conf/qr?game=smoke-speedrun&kind=cabinet&format=svg")
+check("QR code for a cabinet link, as SVG", st == 200 and b"<svg" in raw, st)
+st, _, _ = call("GET", "/admin/api/events/smoke-conf/qr?kind=game")
+check("a multi-game event needs ?game= for a QR code", st == 400, st)
+st, _, _ = call("GET", "/admin/api/events/smoke-conf/qr?game=disk-invaders&kind=cabinet")
+check("no QR code for a link the game doesn't have", st == 404, st)
+st, _, _ = call("GET", "/admin/api/events/ato-2026/qr?kind=leaderboard")
+check("a one-game event's QR code needs no ?game=", st == 200, st)
+st, _, _ = call("GET", "/admin/api/events/smoke-conf/qr?game=disk-invaders&kind=game", jar=False)
+check("QR codes need the admin console", st in (401, 403), st)
+
+st, _, _ = call("PUT", "/admin/api/events/smoke-solo", {"name": "Smoke Solo", "games": ["disk-invaders"]})
+post(game_token, {"game": "smoke-speedrun", "session_id": "smoke-ev-0001", "score": 50000, "event": "smoke-conf"})
+post(game_token, {"game": "smoke-speedrun", "session_id": "smoke-ev-0002", "score": 40000, "event": "smoke-solo"})
+for sid, nick in (("smoke-ev-0001", "AtConf"), ("smoke-ev-0002", "WrongEvent")):
+    call("POST", f"/api/claim/{sid}", {"email": f"{nick.lower()}@example.com", "nickname": nick}, jar=False)
+st, body, _ = call("GET", "/api/v1/games/smoke-speedrun/leaderboard?event=smoke-conf", jar=False)
+check("a score from one of the event's games goes on its board",
+      [e["nickname"] for e in body["leaderboard"]] == ["AtConf"], body.get("leaderboard"))
+st, body, _ = call("GET", "/api/v1/games/smoke-speedrun/leaderboard?event=smoke-solo", jar=False)
+check("a game not in the event is saved without the event", body["leaderboard"] == [], body.get("leaderboard"))
+st, body, _ = call("GET", "/api/v1/games/smoke-speedrun/leaderboard?event=none", jar=False)
+check("... and lands on the no-event board", "WrongEvent" in [e["nickname"] for e in body["leaderboard"]])
+
+st, _, _ = call("PUT", "/admin/api/events/smoke-conf", {"name": "Smoke Conf (renamed)"})
+st, body, _ = call("GET", "/api/events", jar=False)
+ev = next(e for e in body["events"] if e["slug"] == "smoke-conf")
+check("editing an event without games keeps them", ev["name"] == "Smoke Conf (renamed)"
+      and ev["games"] == ["disk-invaders", "smoke-speedrun"], ev)
+st, _, _ = call("PUT", "/admin/api/events/smoke-conf", {"name": "Smoke Conf", "games": ["smoke-speedrun"]})
+st, body, _ = call("GET", "/api/events", jar=False)
+check("the public events list shows each event's games, and games can be removed",
+      next(e for e in body["events"] if e["slug"] == "smoke-conf")["games"] == ["smoke-speedrun"])
+
 print("== revoking")
 tid = next(t["id"] for t in listed if t["prefix"] == game_token[:12])
 st, _, _ = call("DELETE", f"/admin/api/tokens/{tid}")

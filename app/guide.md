@@ -18,8 +18,12 @@ Setup is about five minutes and needs no changes to this service.
    - *Second stat* (optional): e.g. "Level" or "Time", shown next to the score
 2. **API tab → new token**, type **Game**, pick your game. **Copy the token now: it is shown
    once** and only a hash is kept. Put it in your game server's secrets, e.g. `LEADERBOARD_TOKEN`.
-3. *(Optional)* **Events tab:** create events (a conference, a booth) if you want separate boards
-   per event. Games and events combine: every (game, event) pair has its own board.
+3. *(Optional)* **Games tab:** set a **play URL** (and a **cabinet URL** for an arcade build) so
+   events can link to your game. `{event}` in the URL is replaced with the event slug, or
+   `?event=<slug>` is appended, so your game should read `event` from its URL and pass it on when
+   it posts a score.
+4. *(Optional)* **Events tab:** create events (a conference, a booth) and tick the games played
+   there. Every (game, event) pair has its own board, links and QR codes.
 
 ## 2. Post a score when a game ends
 
@@ -64,7 +68,7 @@ claim_url = r.json()["claim_url"]
 | `score` | yes | Whole number, 0 to 2^53. Time games: milliseconds |
 | `secondary` | no | The optional second stat |
 | `details` | no | Any small JSON object (under 2,000 characters), stored and returned |
-| `event` | no | An event slug. Unknown or closed events are saved without an event, never rejected |
+| `event` | no | An event slug. Unknown or closed events, or events that don't run this game, are saved without an event, never rejected |
 | `source` | no | `web` (default), `arcade` or `other` |
 
 The response gives you `claim_url` and `leaderboard_url`.
@@ -91,7 +95,9 @@ Public, no token: `GET /api/v1/games` and `GET /api/v1/games/{game}/leaderboard?
 
 An **Admin** token (API tab) can script the console: `GET /api/v1/admin/scores`
 (`?game=&event=&claimed=&limit=&offset=`), `PATCH`/`DELETE /api/v1/admin/scores/{session_id}`,
-`GET /api/v1/admin/export.csv?game=&event=`, and `PUT /api/v1/admin/games/{slug}` or `/events/{slug}`.
+`GET /api/v1/admin/export.csv?game=&event=`, `PUT /api/v1/admin/games/{slug}` (with `play_url` /
+`cabinet_url`), `GET /api/v1/admin/events`, `PUT /api/v1/admin/events/{slug}` (with `games: [...]`; leave it out to keep the
+current list) and `GET /api/v1/admin/events/{slug}/qr?game=&kind=game|leaderboard|cabinet&format=png|svg`.
 Admin tokens cannot create tokens; only the console can. Send it the same way:
 `Authorization: Bearer lbk_...`. The full schema is at `/docs`.
 

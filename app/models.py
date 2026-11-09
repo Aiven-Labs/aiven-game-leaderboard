@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr, validator
 from datetime import datetime
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 import json
 import re
 
@@ -139,6 +139,9 @@ class EventUpsert(BaseModel):
     name: str
     starts_at: Optional[datetime] = None
     ends_at: Optional[datetime] = None
+    # Slugs of the games played at this event; each gets its own board, links and QR codes.
+    # Leave it out to keep an existing event's games unchanged.
+    games: Optional[List[str]] = None
 
     @validator('name')
     def name_ok(cls, v):
@@ -146,6 +149,33 @@ class EventUpsert(BaseModel):
         if not 1 <= len(v) <= 100:
             raise ValueError('Name must be 1-100 characters')
         return v
+
+    @validator('games')
+    def games_ok(cls, v):
+        if v is None:
+            return v
+        if len(v) > 50:
+            raise ValueError('An event can have at most 50 games')
+        for slug in v:
+            if not SLUG_RE.match(slug):
+                raise ValueError(f'invalid game slug: {slug!r}')
+        return list(dict.fromkeys(v))
+
+
+def _url_template_ok(v):
+    """'' or None clears; otherwise an http(s) URL, optionally containing {event}"""
+    if v is None:
+        return None
+    v = v.strip()
+    if not v:
+        return None
+    if len(v) > 500:
+        raise ValueError('URLs must be 500 characters or fewer')
+    if not re.match(r'^https?://[^\s/]+', v):
+        raise ValueError('must be an http:// or https:// URL')
+    if '{' in v.replace('{event}', '') or '}' in v.replace('{event}', ''):
+        raise ValueError('the only placeholder allowed is {event}')
+    return v
 
 
 SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9-]{0,39}$')
@@ -162,6 +192,15 @@ class GameUpsert(BaseModel):
     secondary_format: Optional[Literal['int', 'money', 'time_ms']] = None
     # Shown on the claim page for a high score; {score} is replaced with the formatted score
     highscore_text: str = 'Your score: {score}'
+    # Where players start the game. {event} is replaced with the event slug; without it,
+    # ?event=<slug> is appended. Leave it out to keep the current value; send "" to clear it.
+    play_url: Optional[str] = None
+    # The arcade cabinet's start page for this game, templated the same way
+    cabinet_url: Optional[str] = None
+
+    @validator('play_url', 'cabinet_url')
+    def urls_ok(cls, v):
+        return _url_template_ok(v)
 
     @validator('name')
     def name_ok(cls, v):

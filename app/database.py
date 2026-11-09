@@ -158,6 +158,39 @@ class Database:
             await conn.execute("ALTER TABLE scores ALTER COLUMN score SET NOT NULL;")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_game_event_score ON scores(game, event, score);")
 
+            # ---- where each game is played ------------------------------------------
+            # play_url / cabinet_url are templates: {event} is replaced with an event slug (or
+            # ?event=<slug> is appended). They are what event links and QR codes point at.
+            had_play_url = await conn.fetchval("""
+                SELECT 1 FROM information_schema.columns WHERE table_name = 'games' AND column_name = 'play_url'
+            """)
+            await conn.execute("ALTER TABLE games ADD COLUMN IF NOT EXISTS play_url VARCHAR(500);")
+            await conn.execute("ALTER TABLE games ADD COLUMN IF NOT EXISTS cabinet_url VARCHAR(500);")
+            if not had_play_url:
+                # Once only, so an admin who clears it later is not overruled at the next boot.
+                # inkless.dev serves /e/<slug> for every event, which is what event links used before.
+                await conn.execute(
+                    "UPDATE games SET play_url = $1 WHERE slug = 'disk-invaders' AND play_url IS NULL",
+                    f"{os.getenv('PUBLIC_GAME_URL', 'https://inkless.dev').rstrip('/')}/e/{{event}}",
+                )
+
+            # ---- which games run at each event --------------------------------------
+            # A score is only put on an event's board if its game is one of the event's games.
+            had_event_games = await conn.fetchval("SELECT to_regclass('public.event_games')")
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS event_games (
+                    event VARCHAR(40) NOT NULL REFERENCES events(slug) ON DELETE CASCADE,
+                    game VARCHAR(40) NOT NULL REFERENCES games(slug) ON DELETE CASCADE,
+                    PRIMARY KEY (event, game)
+                );
+            """)
+            if not had_event_games:
+                # Every event before this existed was a Disk Invaders event
+                await conn.execute("""
+                    INSERT INTO event_games (event, game)
+                    SELECT slug, 'disk-invaders' FROM events ON CONFLICT DO NOTHING
+                """)
+
             # API tokens: only a hash is stored, so a lost token is replaced, never recovered.
             #   kind 'game'  - may submit scores for one game
             #   kind 'admin' - may use the management API (cannot mint tokens)
@@ -199,17 +232,18 @@ class Database:
                            details: dict = None, source: str = 'arcade', event: str = None):
         """Store a score for any game. Unclaimed until its owner attaches a nickname and email."""
         async with self.pool.acquire() as conn:
-            # Only tag the score if the event exists and is open right now; otherwise it is
-            # still saved, just not on any event board
+            # Only tag the score if the event exists, is open right now and runs this game;
+            # otherwise it is still saved, just not on any event board
             if event:
                 open_event = await conn.fetchval("""
-                    SELECT slug FROM events
-                    WHERE slug = $1
-                      AND (starts_at IS NULL OR starts_at <= (NOW() AT TIME ZONE 'UTC'))
-                      AND (ends_at IS NULL OR ends_at >= (NOW() AT TIME ZONE 'UTC'))
-                """, event)
+                    SELECT e.slug FROM events e
+                    JOIN event_games eg ON eg.event = e.slug AND eg.game = $2
+                    WHERE e.slug = $1
+                      AND (e.starts_at IS NULL OR e.starts_at <= (NOW() AT TIME ZONE 'UTC'))
+                      AND (e.ends_at IS NULL OR e.ends_at >= (NOW() AT TIME ZONE 'UTC'))
+                """, event, game)
                 if not open_event:
-                    logger.info(f"Score {session_id}: event '{event}' unknown or closed, saving untagged")
+                    logger.info(f"Score {session_id}: event '{event}' unknown, closed or not running {game}, saving untagged")
                     event = None
 
             # Server time, not the caller's, so boards can't be back- or forward-dated
@@ -418,17 +452,25 @@ class Database:
             return dict(row) if row else None
 
     async def upsert_game(self, slug: str, name: str, score_label: str, score_format: str,
-                          sort_order: str, secondary_label, secondary_format, highscore_text: str):
+                          sort_order: str, secondary_label, secondary_format, highscore_text: str,
+                          play_url=..., cabinet_url=...):
+        """Create or edit a game. play_url / cabinet_url left as ... keep their current value
+        (so older API callers that don't send them can't wipe them); None clears them."""
+        keep_play, keep_cab = play_url is ..., cabinet_url is ...
         async with self.pool.acquire() as conn:
             await conn.execute("""
                 INSERT INTO games (slug, name, score_label, score_format, sort_order,
-                                   secondary_label, secondary_format, highscore_text)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                                   secondary_label, secondary_format, highscore_text, play_url, cabinet_url)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                 ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name,
                     score_label = EXCLUDED.score_label, score_format = EXCLUDED.score_format,
                     sort_order = EXCLUDED.sort_order, secondary_label = EXCLUDED.secondary_label,
-                    secondary_format = EXCLUDED.secondary_format, highscore_text = EXCLUDED.highscore_text
-            """, slug, name, score_label, score_format, sort_order, secondary_label, secondary_format, highscore_text)
+                    secondary_format = EXCLUDED.secondary_format, highscore_text = EXCLUDED.highscore_text,
+                    play_url = CASE WHEN $11 THEN games.play_url ELSE EXCLUDED.play_url END,
+                    cabinet_url = CASE WHEN $12 THEN games.cabinet_url ELSE EXCLUDED.cabinet_url END
+            """, slug, name, score_label, score_format, sort_order, secondary_label, secondary_format,
+                highscore_text, None if keep_play else play_url, None if keep_cab else cabinet_url,
+                keep_play, keep_cab)
 
     # ---- API tokens ---------------------------------------------------------
 
@@ -466,18 +508,44 @@ class Database:
             return dict(row) if row else None
 
     async def list_events(self):
+        """Every event, each with `games`: the slugs of the games it runs, in game order"""
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch("SELECT slug, name, starts_at, ends_at FROM events ORDER BY created_at, slug")
-            return [dict(r) for r in rows]
+            rows = await conn.fetch("""
+                SELECT e.slug, e.name, e.starts_at, e.ends_at,
+                       COALESCE(ARRAY_AGG(eg.game ORDER BY g.created_at, g.slug)
+                                FILTER (WHERE eg.game IS NOT NULL), '{}') AS games
+                FROM events e
+                LEFT JOIN event_games eg ON eg.event = e.slug
+                LEFT JOIN games g ON g.slug = eg.game
+                GROUP BY e.slug
+                ORDER BY e.created_at, e.slug
+            """)
+            return [{**dict(r), "games": list(r["games"])} for r in rows]
 
-    async def upsert_event(self, slug: str, name: str, starts_at, ends_at):
-        """Create an event or edit its name and window (naive UTC datetimes)"""
+    async def upsert_event(self, slug: str, name: str, starts_at, ends_at, games=None):
+        """Create an event or edit its name and window (naive UTC datetimes).
+
+        games: the full list of game slugs the event runs, replacing the old list. None leaves
+        an existing event's games as they are. Unknown slugs raise a ValueError naming them."""
         async with self.pool.acquire() as conn:
-            await conn.execute("""
-                INSERT INTO events (slug, name, starts_at, ends_at) VALUES ($1, $2, $3, $4)
-                ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name,
-                    starts_at = EXCLUDED.starts_at, ends_at = EXCLUDED.ends_at
-            """, slug, name, starts_at, ends_at)
+            async with conn.transaction():
+                if games is not None:
+                    known = {r["slug"] for r in await conn.fetch(
+                        "SELECT slug FROM games WHERE slug = ANY($1::varchar[])", games)}
+                    missing = sorted(set(games) - known)
+                    if missing:
+                        raise ValueError(f"unknown game(s): {', '.join(missing)}")
+                await conn.execute("""
+                    INSERT INTO events (slug, name, starts_at, ends_at) VALUES ($1, $2, $3, $4)
+                    ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name,
+                        starts_at = EXCLUDED.starts_at, ends_at = EXCLUDED.ends_at
+                """, slug, name, starts_at, ends_at)
+                if games is not None:
+                    await conn.execute("DELETE FROM event_games WHERE event = $1", slug)
+                    await conn.executemany(
+                        "INSERT INTO event_games (event, game) VALUES ($1, $2)",
+                        [(slug, g) for g in dict.fromkeys(games)],
+                    )
 
     async def admin_update_score(self, session_id: str, nickname, company, email):
         """Update the player-supplied fields of a score.

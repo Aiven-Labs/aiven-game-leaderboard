@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import time
+import urllib.parse
 from contextlib import asynccontextmanager
 
 from .database import database
@@ -181,6 +182,8 @@ def _game_public(game: dict) -> dict:
         "sort_order": game["sort_order"],
         "secondary_label": game["secondary_label"], "secondary_format": game["secondary_format"],
         "highscore_text": game["highscore_text"],
+        "play_url": game.get("play_url"),
+        "cabinet_url": game.get("cabinet_url"),
     }
 
 
@@ -1104,6 +1107,7 @@ async def list_events():
                 "name": e["name"],
                 "starts_at": e["starts_at"].isoformat() if e["starts_at"] else None,
                 "ends_at": e["ends_at"].isoformat() if e["ends_at"] else None,
+                "games": e["games"],
             }
             for e in events
         ]}
@@ -1379,9 +1383,12 @@ async def admin_list_scores(game: str | None = None, event: str | None = None,
         raise HTTPException(status_code=500, detail="Failed to list scores")
 
 
-# Where players and slide-deck QR codes point. inkless.dev serves /e/<slug> for every event
-# (a wildcard redirect to the game with the event and UTM tags), so a new event needs no code.
-PUBLIC_GAME_URL = os.getenv("PUBLIC_GAME_URL", "https://inkless.dev").rstrip("/")
+# Event links and QR codes are built per (event, game): each game says where it is played
+# (games.play_url / cabinet_url), and its event board lives on this service.
+# PUBLIC_LEADERBOARD_URL pins the board links to a stable host (the Aiven app URL can change
+# if the service is recreated); without it they use the host the console was opened on.
+PUBLIC_LEADERBOARD_URL = os.getenv("PUBLIC_LEADERBOARD_URL", "").strip().rstrip("/")
+QR_KINDS = ("game", "leaderboard", "cabinet")
 
 
 def _origin(request: Request) -> str:
@@ -1390,13 +1397,36 @@ def _origin(request: Request) -> str:
     return f"{proto}://{host}"
 
 
-def _event_links(slug: str, request: Request) -> dict:
+def _fill_event(template: str | None, event: str) -> str | None:
+    """A game's URL template with the event in it: {event} is replaced, else ?event= is added"""
+    if not template:
+        return None
+    if "{event}" in template:
+        return template.replace("{event}", urllib.parse.quote(event, safe=""))
+    base, _, fragment = template.partition("#")
+    sep = "&" if "?" in base else "?"
+    url = f"{base}{sep}event={urllib.parse.quote(event, safe='')}"
+    return f"{url}#{fragment}" if fragment else url
+
+
+def _board_links(event: str, game: dict, request: Request) -> dict:
+    """The links (and so the QR codes) for one game at one event. A link is None when the
+    game has no URL of that kind set in the Games tab."""
+    board_base = PUBLIC_LEADERBOARD_URL or _origin(request)
+    q = urllib.parse.urlencode({"game": game["slug"], "event": event})
     return {
-        "game": f"{PUBLIC_GAME_URL}/e/{slug}",
-        "leaderboard": f"{PUBLIC_GAME_URL}/e/{slug}/leaderboard",
-        # The arcade cabinet's browser is pointed here once; it plays at this event from then on
-        "cabinet": f"{_origin(request)}/qrcode/?event={slug}",
+        "game": _fill_event(game.get("play_url"), event),
+        "leaderboard": f"{board_base}/leaderboard?{q}",
+        "cabinet": _fill_event(game.get("cabinet_url"), event),
     }
+
+
+def _event_boards(e: dict, games_by_slug: dict, request: Request) -> list:
+    return [
+        {"game": slug, "game_name": games_by_slug[slug]["name"],
+         "links": _board_links(e["slug"], games_by_slug[slug], request)}
+        for slug in e["games"] if slug in games_by_slug
+    ]
 
 
 def _event_status(e: dict) -> str:
@@ -1411,33 +1441,54 @@ def _event_status(e: dict) -> str:
 @app.get("/admin/api/events", dependencies=[Depends(require_admin)])
 @app.get("/api/v1/admin/events", dependencies=[Depends(require_admin)])
 async def admin_list_events(request: Request):
+    """Every event with one board per game: its game, leaderboard and cabinet links"""
     events = await database.list_events()
-    return {"events": [
-        {"slug": e["slug"], "name": e["name"],
-         "starts_at": e["starts_at"].isoformat() if e["starts_at"] else None,
-         "ends_at": e["ends_at"].isoformat() if e["ends_at"] else None,
-         "status": _event_status(e),
-         "links": _event_links(e["slug"], request)}
-        for e in events
-    ]}
+    games_by_slug = await _games_by_slug()
+    out = []
+    for e in events:
+        boards = _event_boards(e, games_by_slug, request)
+        out.append({
+            "slug": e["slug"], "name": e["name"],
+            "starts_at": e["starts_at"].isoformat() if e["starts_at"] else None,
+            "ends_at": e["ends_at"].isoformat() if e["ends_at"] else None,
+            "status": _event_status(e),
+            "games": e["games"],
+            "boards": boards,
+            # Before events had games: the first board's links, for older scripts
+            "links": boards[0]["links"] if boards else None,
+        })
+    return {"events": out}
 
 
 @app.get("/admin/api/events/{slug}/qr", dependencies=[Depends(require_admin)])
 @app.get("/api/v1/admin/events/{slug}/qr", dependencies=[Depends(require_admin)])
-async def admin_event_qr(slug: str, request: Request, kind: str = "game", format: str = "png"):
-    """A QR code for one of an event's links, ready for a slide or poster.
+async def admin_event_qr(slug: str, request: Request, kind: str = "game", format: str = "png",
+                         game: str | None = None):
+    """A QR code for one game's link at an event, ready for a slide or poster.
 
-    kind: game (players' phones), leaderboard (the event's board) or cabinet (the arcade URL).
-    High error correction, so it still scans when projected or printed small."""
+    game: one of the event's games (may be left out when the event has only one).
+    kind: game (players' phones), leaderboard (that game's board for the event) or cabinet
+    (the arcade URL). High error correction, so it still scans when projected or printed small."""
     if not EVENT_SLUG_RE.match(slug):
         raise HTTPException(status_code=400, detail="bad event slug")
-    if kind not in ("game", "leaderboard", "cabinet") or format not in ("png", "svg"):
+    if kind not in QR_KINDS or format not in ("png", "svg"):
         raise HTTPException(status_code=400, detail="kind must be game, leaderboard or cabinet; format png or svg")
-    events = await database.list_events()
-    if slug not in {e["slug"] for e in events}:
+    event = next((e for e in await database.list_events() if e["slug"] == slug), None)
+    if not event:
         raise HTTPException(status_code=404, detail="Event not found")
+    if game is None:
+        if len(event["games"]) != 1:
+            raise HTTPException(status_code=400, detail="This event has several games (or none): pass ?game=<slug>")
+        game = event["games"][0]
+    if game not in event["games"]:
+        raise HTTPException(status_code=404, detail="That game is not part of this event")
+    game_row = await database.get_game(game)
+    if not game_row:
+        raise HTTPException(status_code=404, detail="Unknown game")
 
-    url = _event_links(slug, request)[kind]
+    url = _board_links(slug, game_row, request)[kind]
+    if not url:
+        raise HTTPException(status_code=404, detail=f"{game_row['name']} has no {kind} URL; set it in the Games tab")
     buffer = io.BytesIO()
     qr = segno.make(url, error="h", micro=False)
     if format == "svg":
@@ -1449,14 +1500,15 @@ async def admin_event_qr(slug: str, request: Request, kind: str = "game", format
     return Response(
         content=buffer.getvalue(),
         media_type=media,
-        headers={"Content-Disposition": f'inline; filename="{slug}-{kind}.{format}"', "Cache-Control": "no-store"},
+        headers={"Content-Disposition": f'inline; filename="{slug}-{game}-{kind}.{format}"', "Cache-Control": "no-store"},
     )
 
 
 @app.put("/admin/api/events/{slug}", dependencies=[Depends(require_admin)])
 @app.put("/api/v1/admin/events/{slug}", dependencies=[Depends(require_admin)])
 async def admin_upsert_event(slug: str, event: EventUpsert):
-    """Create an event or edit its name and window. Times are UTC; leave them out for always-open"""
+    """Create an event or edit its name, window and games. Times are UTC; leave them out for
+    always-open. `games` replaces the event's game list; leave it out to keep the current one."""
     if not EVENT_SLUG_RE.match(slug):
         raise HTTPException(status_code=400, detail="slug must be lowercase letters, numbers and hyphens")
 
@@ -1466,9 +1518,11 @@ async def admin_upsert_event(slug: str, event: EventUpsert):
         return dt.astimezone(timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
 
     try:
-        await database.upsert_event(slug, event.name, naive_utc(event.starts_at), naive_utc(event.ends_at))
-        logger.info(f"Admin saved event {slug}")
+        await database.upsert_event(slug, event.name, naive_utc(event.starts_at), naive_utc(event.ends_at), event.games)
+        logger.info(f"Admin saved event {slug} (games: {event.games if event.games is not None else 'unchanged'})")
         return {"success": True}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Error saving event {slug}: {e}")
         raise HTTPException(status_code=500, detail="Failed to save event")
@@ -1810,6 +1864,9 @@ async def admin_upsert_game(slug: str, game: GameUpsert):
     await database.upsert_game(
         slug, game.name, game.score_label, game.score_format, game.sort_order,
         game.secondary_label, game.secondary_format, game.highscore_text,
+        # Only touch the URLs when the caller sent them, so older scripts can't wipe them
+        play_url=game.play_url if "play_url" in game.model_fields_set else ...,
+        cabinet_url=game.cabinet_url if "cabinet_url" in game.model_fields_set else ...,
     )
     logger.info(f"Admin saved game {slug}")
     return {"success": True}

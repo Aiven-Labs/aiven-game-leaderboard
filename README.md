@@ -12,8 +12,9 @@ Built with FastAPI and PostgreSQL.
 - **Games**: any number of games, each with its own score label, format (`int`, `money`,
   `time_ms`) and sort order.
 - **Per-game API tokens**: a game server posts scores with a bearer token scoped to one game.
-- **Events**: self-serve event boards (conferences, booths) that can overlap in time.
-  Every (game, event) pair gets its own leaderboard. See [EVENTS.md](EVENTS.md).
+- **Events**: self-serve events (conferences, booths) that can overlap in time and run several
+  games each. Every (event, game) pair gets its own leaderboard, game link, cabinet URL and QR
+  codes. See [EVENTS.md](EVENTS.md).
 - **Claims**: players claim a score with a nickname and email, usually from a QR code.
 - **Admin console** at `/admin` for scores, games, events and tokens, plus CSV export.
 
@@ -49,7 +50,8 @@ The legacy Disk Invaders endpoints (`/api/scores`, `/api/leaderboard`,
 | `ADMIN_KEY` | yes | Admin console password |
 | `INGEST_SECRET` | no | When set, the legacy `/api/scores` endpoint requires `X-Ingest-Secret` |
 | `CORS_ORIGINS` | no | Comma-separated origins |
-| `PUBLIC_GAME_URL` | no | Base URL for event game links and QR codes (default `https://inkless.dev`) |
+| `PUBLIC_LEADERBOARD_URL` | no | Stable base URL for event leaderboard links and QR codes. Default: the host the admin console is opened on |
+| `PUBLIC_GAME_URL` | no | Only used once, on upgrade, to seed Disk Invaders' play URL (default `https://inkless.dev`). Game links now come from each game's play URL |
 | `LOG_LEVEL` | no | Default `INFO` |
 
 ## Running locally

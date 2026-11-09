@@ -198,6 +198,11 @@
         .hidden { display: none !important; }
         .link-buttons button { display: block; margin: 0 0 6px; width: 100%; text-align: left; }
         .qr-cell { white-space: nowrap; }
+        .game-picks { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; border: 1px solid rgba(255,255,255,.2); border-radius: 6px; padding: 4px 10px; margin: 0; }
+        .game-picks legend { font-size: 12px; opacity: .7; padding: 0 4px; }
+        .game-picks label { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+        .event-row-cont td { border-top: none; }
+        .url-cell { max-width: 280px; overflow-wrap: anywhere; font-size: 12px; }
         .qr-item { display: inline-flex; align-items: center; gap: 8px; margin-right: 14px; vertical-align: top; }
         .qr-item img { background: #fff; border-radius: 4px; padding: 2px; }
     </style>
@@ -271,20 +276,21 @@
             </section>
 
             <section id="tab-events" role="tabpanel" aria-labelledby="tab-btn-events" class="hidden">
-                <p class="muted tab-intro"><strong>To add an event:</strong> fill in the form and save. Its game link, leaderboard link, arcade-cabinet URL and QR codes appear in the table, ready to paste into slides or posters. Each event keeps its own leaderboard, so events can run on the same dates. Times are UTC; leave them blank for always open.</p>
+                <p class="muted tab-intro"><strong>To add an event:</strong> fill in the form, tick the games being played there, and save. Each game gets its own game link, leaderboard link, arcade-cabinet URL and QR codes in the table, ready to paste into slides or posters. Every (event, game) pair keeps its own leaderboard, so events can run on the same dates. Only scores from an event's games go on its boards. Times are UTC; leave them blank for always open. A game's links come from the URLs set in the <a href="#games">Games tab</a>.</p>
 
             <form id="event-form" class="toolbar" style="margin:0 0 8px">
-                <input type="text" id="ev-slug" placeholder="slug, e.g. pgconf-2026" pattern="[a-z0-9][a-z0-9-]{0,39}" required>
+                <input type="text" id="ev-slug" placeholder="slug, e.g. pgconf-2026" pattern="[a-z0-9][a-z0-9\-]{0,39}" required>
                 <input type="text" id="ev-name" placeholder="Display name" maxlength="100" required>
                 <input type="datetime-local" id="ev-start" title="Opens (UTC)">
                 <input type="datetime-local" id="ev-end" title="Closes (UTC)">
+                <fieldset id="ev-games" class="game-picks" aria-label="Games at this event"><legend>Games</legend></fieldset>
                 <button type="submit">Save event</button>
             </form>
                 <div class="message hidden" id="event-message"></div>
 
             <div class="table-wrap">
                 <table>
-                    <thead><tr><th>Event</th><th>Window (UTC)</th><th>Status</th><th>Links (click to copy)</th><th>QR codes</th><th></th></tr></thead>
+                    <thead><tr><th>Event</th><th>Window (UTC)</th><th>Status</th><th>Game</th><th>Links (click to copy)</th><th>QR codes</th><th></th></tr></thead>
                     <tbody id="event-rows"></tbody>
                 </table>
             </div>
@@ -293,7 +299,7 @@
             <section id="tab-games" role="tabpanel" aria-labelledby="tab-btn-games" class="hidden">
                 <p class="muted tab-intro"><strong>A game says how its scores rank and display.</strong> Add one here, then make a Game token in the API tab so the game's server can post scores. Higher-wins suits points; lower-wins suits times and move counts. Changing the order re-ranks the game's existing scores.</p>
                 <form id="game-form" class="toolbar" style="margin:0 0 8px">
-                    <input type="text" id="g-slug" placeholder="slug, e.g. my-game" pattern="[a-z0-9][a-z0-9-]{0,39}" required>
+                    <input type="text" id="g-slug" placeholder="slug, e.g. my-game" pattern="[a-z0-9][a-z0-9\-]{0,39}" required>
                     <input type="text" id="g-name" placeholder="Game name" maxlength="100" required>
                     <input type="text" id="g-score-label" placeholder="Score label (Points)" maxlength="40" required>
                     <select id="g-score-format" title="How the score is shown"><option value="int">Number (1,234)</option><option value="money">Money ($1.2k)</option><option value="time_ms">Time (1:02.345)</option></select>
@@ -301,12 +307,14 @@
                     <input type="text" id="g-sec-label" placeholder="Second stat label (optional)" maxlength="40">
                     <select id="g-sec-format" title="How the second stat is shown"><option value="int">Number</option><option value="money">Money</option><option value="time_ms">Time</option></select>
                     <input type="text" id="g-highscore" placeholder="High-score text: Your score: {score}" maxlength="200" style="min-width:260px">
+                    <input type="text" id="g-play-url" placeholder="Play URL, e.g. https://my-game.dev/?event={event}" maxlength="500" style="min-width:320px" title="Where players start the game. {event} becomes the event slug; without it ?event=<slug> is added">
+                    <input type="text" id="g-cabinet-url" placeholder="Arcade cabinet URL (optional)" maxlength="500" style="min-width:260px" title="The cabinet browser's start page; templated like the play URL">
                     <button type="submit">Save game</button>
                 </form>
                 <div class="message hidden" id="game-message"></div>
                 <div class="table-wrap">
                     <table>
-                        <thead><tr><th>Game</th><th>Score</th><th>Second stat</th><th style="text-align:right">Scores</th><th>Leaderboard</th><th></th></tr></thead>
+                        <thead><tr><th>Game</th><th>Score</th><th>Second stat</th><th>Play / cabinet URL</th><th style="text-align:right">Scores</th><th>Leaderboard</th><th></th></tr></thead>
                         <tbody id="game-rows"></tbody>
                     </table>
                 </div>
@@ -491,7 +499,11 @@
 
                 el('password').value = '';
                 el('gate-error').textContent = '';
+                // Every tab, not just scores: the first load ran signed out and got 401s
                 await load();
+                await loadEvents();
+                await loadGames();
+                await loadTokens();
             } catch (err) {
                 el('gate-error').textContent = 'Sign in failed: ' + err.message;
             }
@@ -622,32 +634,51 @@
 
         function utcLocal(iso) { return iso ? iso.slice(0, 16) : ''; }
 
+        function renderEventGamePicks(selected) {
+            const box = el('ev-games');
+            const picked = new Set(selected || [...box.querySelectorAll('input:checked')].map((i) => i.value));
+            box.innerHTML = '<legend>Games</legend>' + (games.map((g) => `
+                <label><input type="checkbox" value="${escapeHtml(g.slug)}"${picked.has(g.slug) ? ' checked' : ''}> ${escapeHtml(g.name)}</label>`).join('')
+                || '<span class="muted">Add a game first</span>');
+        }
+
         function renderEvents() {
-            const qr = (e, kind, label) => {
-                const base = '/admin/api/events/' + encodeURIComponent(e.slug) + '/qr?kind=' + kind;
+            const qr = (e, b, kind, label) => {
+                if (!b.links[kind]) return '';
+                const base = '/admin/api/events/' + encodeURIComponent(e.slug) + '/qr?game=' + encodeURIComponent(b.game) + '&kind=' + kind;
+                const file = escapeHtml(e.slug + '-' + b.game + '-' + kind);
                 return `<div class="qr-item">
-                    <img src="${base}&format=png" alt="${label} QR" width="72" height="72">
+                    <img src="${base}&format=png" alt="${escapeHtml(b.game_name)} ${label} QR" width="72" height="72">
                     <div><strong>${label}</strong><br>
-                        <a href="${base}&format=png" download="${escapeHtml(e.slug)}-${kind}.png">PNG</a> ·
-                        <a href="${base}&format=svg" download="${escapeHtml(e.slug)}-${kind}.svg">SVG</a></div>
+                        <a href="${base}&format=png" download="${file}.png">PNG</a> ·
+                        <a href="${base}&format=svg" download="${file}.svg">SVG</a></div>
                 </div>`;
             };
-            const copy = (url, label) =>
-                `<button class="secondary" data-copy="${escapeHtml(url)}" title="${escapeHtml(url)}">${label}</button>`;
+            const copy = (url, label) => url
+                ? `<button class="secondary" data-copy="${escapeHtml(url)}" title="${escapeHtml(url)}">${label}</button>`
+                : '';
+            const missing = (b) => (b.links.game ? '' : '<div class="muted">No play URL: <a href="#games">set one in Games</a></div>');
 
-            el('event-rows').innerHTML = events.map((e) => `
-                <tr>
-                    <td><strong>${escapeHtml(e.name)}</strong><br><span class="muted">${escapeHtml(e.slug)}</span></td>
-                    <td class="date">${escapeHtml(utcLocal(e.starts_at)) || 'always'}<br>${escapeHtml(utcLocal(e.ends_at)) || 'never ends'}</td>
-                    <td><span class="pill ${e.status === 'open' ? 'claimed' : 'unclaimed'}">${escapeHtml(e.status)}</span></td>
+            el('event-rows').innerHTML = events.map((e) => {
+                const boards = e.boards.length ? e.boards : [null];
+                const span = boards.length;
+                return boards.map((b, i) => `
+                <tr${i ? ' class="event-row-cont"' : ''}>
+                    ${i ? '' : `<td rowspan="${span}"><strong>${escapeHtml(e.name)}</strong><br><span class="muted">${escapeHtml(e.slug)}</span></td>
+                    <td rowspan="${span}" class="date">${escapeHtml(utcLocal(e.starts_at)) || 'always'}<br>${escapeHtml(utcLocal(e.ends_at)) || 'never ends'}</td>
+                    <td rowspan="${span}"><span class="pill ${e.status === 'open' ? 'claimed' : 'unclaimed'}">${escapeHtml(e.status)}</span></td>`}
+                    ${b ? `<td><strong>${escapeHtml(b.game_name)}</strong><br><span class="muted">${escapeHtml(b.game)}</span></td>
                     <td class="link-buttons">
-                        ${copy(e.links.game, 'Game link')}
-                        ${copy(e.links.leaderboard, 'Leaderboard link')}
-                        ${copy(e.links.cabinet, 'Cabinet URL')}
+                        ${copy(b.links.game, 'Game link')}
+                        ${copy(b.links.leaderboard, 'Leaderboard link')}
+                        ${copy(b.links.cabinet, 'Cabinet URL')}
+                        ${missing(b)}
                     </td>
-                    <td class="qr-cell">${qr(e, 'game', 'Game')}${qr(e, 'leaderboard', 'Leaderboard')}</td>
-                    <td class="actions"><button class="secondary" data-edit="${escapeHtml(e.slug)}">Edit</button></td>
-                </tr>`).join('') || '<tr><td colspan="6" class="muted">No events yet.</td></tr>';
+                    <td class="qr-cell">${qr(e, b, 'game', 'Game')}${qr(e, b, 'leaderboard', 'Leaderboard')}${qr(e, b, 'cabinet', 'Cabinet')}</td>`
+                    : '<td colspan="3" class="muted">No games yet: edit the event and tick at least one.</td>'}
+                    ${i ? '' : `<td rowspan="${span}" class="actions"><button class="secondary" data-edit="${escapeHtml(e.slug)}">Edit</button></td>`}
+                </tr>`).join('');
+            }).join('') || '<tr><td colspan="7" class="muted">No events yet.</td></tr>';
 
             el('count-events').textContent = events.length;
             const filter = el('event-filter');
@@ -680,6 +711,7 @@
             el('ev-name').value = e.name;
             el('ev-start').value = utcLocal(e.starts_at);
             el('ev-end').value = utcLocal(e.ends_at);
+            renderEventGamePicks(e.games);
             el('ev-name').focus();
         });
 
@@ -687,6 +719,13 @@
             ev.preventDefault();
             const msg = el('event-message');
             const asUtc = (v) => (v ? v + ':00Z' : null);
+            const picked = [...el('ev-games').querySelectorAll('input:checked')].map((i) => i.value);
+            if (!picked.length) {
+                msg.textContent = 'Tick at least one game for this event.';
+                msg.classList.remove('hidden');
+                msg.classList.add('error');
+                return;
+            }
             try {
                 const res = await fetch('/admin/api/events/' + encodeURIComponent(el('ev-slug').value.trim()), {
                     method: 'PUT',
@@ -696,11 +735,13 @@
                         name: el('ev-name').value,
                         starts_at: asUtc(el('ev-start').value),
                         ends_at: asUtc(el('ev-end').value),
+                        games: picked,
                     }),
                 });
                 if (!res.ok) throw new Error(describe(await res.json().catch(() => ({}))));
                 msg.classList.add('hidden');
                 el('event-form').reset();
+                renderEventGamePicks([]);
                 await loadEvents();
             } catch (err) {
                 msg.textContent = 'Could not save event: ' + err.message;
@@ -720,10 +761,12 @@
                     <td><strong>${escapeHtml(g.name)}</strong><br><span class="muted">${escapeHtml(g.slug)}</span></td>
                     <td>${escapeHtml(g.score_label)}<br><span class="muted">${FORMAT_NAMES[g.score_format]} &middot; ${g.sort_order === 'asc' ? 'lower wins' : 'higher wins'}</span></td>
                     <td>${g.secondary_label ? escapeHtml(g.secondary_label) + '<br><span class="muted">' + FORMAT_NAMES[g.secondary_format] + '</span>' : '<span class="muted">none</span>'}</td>
+                    <td class="url-cell">${g.play_url ? escapeHtml(g.play_url) : '<span class="muted">no play URL</span>'}${g.cabinet_url ? '<br><span class="muted">cabinet: ' + escapeHtml(g.cabinet_url) + '</span>' : ''}</td>
                     <td class="savings">${g.score_count}</td>
                     <td><a href="/leaderboard?game=${encodeURIComponent(g.slug)}" target="_blank" rel="noopener">View</a></td>
                     <td class="actions"><button class="secondary" data-edit-game="${escapeHtml(g.slug)}">Edit</button></td>
-                </tr>`).join('') || '<tr><td colspan="6" class="muted">No games yet.</td></tr>';
+                </tr>`).join('') || '<tr><td colspan="7" class="muted">No games yet.</td></tr>';
+            renderEventGamePicks();
 
             const options = games.map((g) => `<option value="${escapeHtml(g.slug)}">${escapeHtml(g.name)}</option>`).join('');
             const filter = el('game-filter');
@@ -739,7 +782,7 @@
         async function loadGames() {
             try {
                 const res = await fetch('/admin/api/games', { credentials: 'same-origin' });
-                if (res.ok) { games = (await res.json()).games; renderGames(); render(); }
+                if (res.ok) { games = (await res.json()).games; renderGames(); render(); if (events.length) renderEvents(); }
             } catch (err) { /* other tabs still work */ }
         }
 
@@ -754,6 +797,8 @@
             el('g-sec-label').value = g.secondary_label || '';
             el('g-sec-format').value = g.secondary_format || 'int';
             el('g-highscore').value = g.highscore_text;
+            el('g-play-url').value = g.play_url || '';
+            el('g-cabinet-url').value = g.cabinet_url || '';
             el('g-name').focus();
         });
 
@@ -773,6 +818,8 @@
                         secondary_label: el('g-sec-label').value.trim() || null,
                         secondary_format: el('g-sec-label').value.trim() ? el('g-sec-format').value : null,
                         highscore_text: el('g-highscore').value.trim() || 'Your score: {score}',
+                        play_url: el('g-play-url').value.trim(),
+                        cabinet_url: el('g-cabinet-url').value.trim(),
                     }),
                 });
                 if (!res.ok) throw new Error(describe(await res.json().catch(() => ({}))));
