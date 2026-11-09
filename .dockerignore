@@ -29,6 +29,7 @@ ENV/
 # Documentation and development files
 README.md
 *.md
+!app/guide.md
 LICENSE
 docs/
 *.txt
@@ -40,7 +41,7 @@ package*.json
 rollup.config*.js
 tsconfig.json
 
-# Frontend game files (we only need the score server)
+# Frontend game files (none here, kept for safety)
 src/
 docs/
 assets/

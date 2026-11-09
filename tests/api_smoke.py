@@ -1,6 +1,6 @@
 """End-to-end checks for the leaderboard API, run against a live instance (stdlib only).
 
-    ADMIN_KEY=... INGEST_SECRET=... python3 score_server/tests/api_smoke.py http://localhost:8000
+    ADMIN_KEY=... INGEST_SECRET=... python3 tests/api_smoke.py http://localhost:8000
 
 Creates a throwaway game, so run it against a local or staging instance, not production.
 """

@@ -1,5 +1,5 @@
-# Score server only (admin console, claim pages, legacy score API).
-# The game client is served by deploy/web. Build context: repo root.
+# Aiven game leaderboard service: scores, claims, events, admin console, v1 API.
+# Build context: repo root.
 
 # Score server dependency stage
 FROM python:3.11-slim as builder
@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
-COPY score_server/requirements.txt .
+COPY requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
 # Production stage
@@ -39,7 +39,7 @@ COPY --from=builder /root/.local /home/appuser/.local
 ENV PATH=/home/appuser/.local/bin:$PATH
 
 # Copy application files with verification
-COPY score_server/app/ /tmp/app_source/
+COPY app/ /tmp/app_source/
 RUN mkdir -p ./app/ && \
     cp -rv /tmp/app_source/* ./app/ && \
     echo "=== FILE VERIFICATION ===" && \
@@ -64,7 +64,7 @@ USER appuser
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
-# No game build in this image: the nginx service serves the client
+# No game client in this image; games are hosted separately
 ENV GAME_STATIC_DIR=/nonexistent
 
 # Expose port

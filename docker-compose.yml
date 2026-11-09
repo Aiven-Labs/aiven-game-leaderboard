@@ -1,0 +1,40 @@
+# Local development stack for the Aiven game leaderboard.
+#
+#   docker compose up --build      # http://localhost:8000/admin
+#
+# Then run the end-to-end checks against it:
+#   ADMIN_KEY=local_dev_admin_key INGEST_SECRET=local_dev_ingest python3 tests/api_smoke.py http://localhost:8000
+
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: leaderboard
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-leaderboard_dev_password}
+      POSTGRES_DB: leaderboard
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - leaderboard_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U leaderboard -d leaderboard"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  leaderboard:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://leaderboard:${POSTGRES_PASSWORD:-leaderboard_dev_password}@db:5432/leaderboard
+      ADMIN_KEY: ${ADMIN_KEY:-local_dev_admin_key}
+      INGEST_SECRET: ${INGEST_SECRET:-local_dev_ingest}
+      CORS_ORIGINS: "*"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "${PORT:-8000}:8000"
+
+volumes:
+  leaderboard_db_data:
