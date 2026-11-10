@@ -97,7 +97,7 @@ An **Admin** token (API tab) can script the console: `GET /api/v1/admin/scores`
 (`?game=&event=&claimed=&limit=&offset=`), `PATCH`/`DELETE /api/v1/admin/scores/{session_id}`,
 `GET /api/v1/admin/export.csv?game=&event=`, `PUT /api/v1/admin/games/{slug}` (with `play_url` /
 `cabinet_url`), `GET /api/v1/admin/events`, `PUT /api/v1/admin/events/{slug}` (with `games: [...]`; leave it out to keep the
-current list) and `GET /api/v1/admin/events/{slug}/qr?game=&kind=game|leaderboard|cabinet&format=png|svg`.
+current list. `cta_text` + `cta_url` set the post-claim button; send both as `""` to clear, leave both out to keep) and `GET /api/v1/admin/events/{slug}/qr?game=&kind=game|leaderboard|cabinet&format=png|svg`.
 Admin tokens cannot create tokens; only the console can. Send it the same way:
 `Authorization: Bearer lbk_...`. The full schema is at `/docs`.
 

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, validator
+from pydantic import BaseModel, EmailStr, Field, validator
 from datetime import datetime
 from typing import List, Literal, Optional
 import json
@@ -142,6 +142,11 @@ class EventUpsert(BaseModel):
     # Slugs of the games played at this event; each gets its own board, links and QR codes.
     # Leave it out to keep an existing event's games unchanged.
     games: Optional[List[str]] = None
+    # Post-claim call to action: button text and where it sends the player. Send both, or
+    # both as "" to clear; leave both out to keep an existing event's CTA unchanged.
+    cta_text: Optional[str] = None
+    # validate_default so cta_text sent without cta_url is still caught
+    cta_url: Optional[str] = Field(None, validate_default=True)
 
     @validator('name')
     def name_ok(cls, v):
@@ -149,6 +154,37 @@ class EventUpsert(BaseModel):
         if not 1 <= len(v) <= 100:
             raise ValueError('Name must be 1-100 characters')
         return v
+
+    @validator('cta_text')
+    def cta_text_ok(cls, v):
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) > 100:
+            raise ValueError('CTA text must be at most 100 characters')
+        return v
+
+    @validator('cta_url')
+    def cta_url_ok(cls, v, values):
+        text = values.get('cta_text')
+        if v is None:
+            if text is not None:
+                raise ValueError('send cta_url with cta_text')
+            return v
+        v = v.strip()
+        if text is None:
+            raise ValueError('send cta_text with cta_url')
+        if bool(v) != bool(text):
+            raise ValueError('CTA needs both button text and a link (or neither)')
+        if v and (len(v) > 500 or not re.match(r'^https?://\S+$', v)):
+            raise ValueError('CTA link must be an http(s) URL')
+        return v
+
+    def cta(self):
+        """(text, url), (None, None) to clear, or None when the CTA was left out"""
+        if self.cta_text is None and self.cta_url is None:
+            return None
+        return (self.cta_text or None, self.cta_url or None)
 
     @validator('games')
     def games_ok(cls, v):

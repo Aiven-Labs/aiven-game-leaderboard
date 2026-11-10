@@ -276,7 +276,7 @@
             </section>
 
             <section id="tab-events" role="tabpanel" aria-labelledby="tab-btn-events" class="hidden">
-                <p class="muted tab-intro"><strong>To add an event:</strong> fill in the form, tick the games being played there, and save. Each game gets its own game link, leaderboard link, arcade-cabinet URL and QR codes in the table, ready to paste into slides or posters. Every (event, game) pair keeps its own leaderboard, so events can run on the same dates. Only scores from an event's games go on its boards. Times are UTC; leave them blank for always open. A game's links come from the URLs set in the <a href="#games">Games tab</a>.</p>
+                <p class="muted tab-intro"><strong>To add an event:</strong> fill in the form, tick the games being played there, and save. Each game gets its own game link, leaderboard link, arcade-cabinet URL and QR codes in the table, ready to paste into slides or posters. Every (event, game) pair keeps its own leaderboard, so events can run on the same dates. Only scores from an event's games go on its boards. Times are UTC; leave them blank for always open. A game's links come from the URLs set in the <a href="#games">Games tab</a>. Set a CTA (button text and link) to send players somewhere after they claim a score at this event; leave it blank for the default Inkless link.</p>
 
             <form id="event-form" class="toolbar" style="margin:0 0 8px">
                 <input type="text" id="ev-slug" placeholder="slug, e.g. pgconf-2026" pattern="[a-z0-9][a-z0-9\-]{0,39}" required>
@@ -284,6 +284,8 @@
                 <input type="datetime-local" id="ev-start" title="Opens (UTC)">
                 <input type="datetime-local" id="ev-end" title="Closes (UTC)">
                 <fieldset id="ev-games" class="game-picks" aria-label="Games at this event"><legend>Games</legend></fieldset>
+                <input type="text" id="ev-cta-text" placeholder="CTA button text (optional)" maxlength="100" title="Shown to players after they claim a score at this event">
+                <input type="url" id="ev-cta-url" placeholder="CTA link, https://..." maxlength="500" title="Where the CTA button sends players">
                 <button type="submit">Save event</button>
             </form>
                 <div class="message hidden" id="event-message"></div>
@@ -664,7 +666,8 @@
                 const span = boards.length;
                 return boards.map((b, i) => `
                 <tr${i ? ' class="event-row-cont"' : ''}>
-                    ${i ? '' : `<td rowspan="${span}"><strong>${escapeHtml(e.name)}</strong><br><span class="muted">${escapeHtml(e.slug)}</span></td>
+                    ${i ? '' : `<td rowspan="${span}"><strong>${escapeHtml(e.name)}</strong><br><span class="muted">${escapeHtml(e.slug)}</span>
+                        <div class="muted">CTA: ${e.cta_url ? `<a href="${escapeHtml(e.cta_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(e.cta_text)}</a>` : 'Inkless default'}</div></td>
                     <td rowspan="${span}" class="date">${escapeHtml(utcLocal(e.starts_at)) || 'always'}<br>${escapeHtml(utcLocal(e.ends_at)) || 'never ends'}</td>
                     <td rowspan="${span}"><span class="pill ${e.status === 'open' ? 'claimed' : 'unclaimed'}">${escapeHtml(e.status)}</span></td>`}
                     ${b ? `<td><strong>${escapeHtml(b.game_name)}</strong><br><span class="muted">${escapeHtml(b.game)}</span></td>
@@ -711,6 +714,8 @@
             el('ev-name').value = e.name;
             el('ev-start').value = utcLocal(e.starts_at);
             el('ev-end').value = utcLocal(e.ends_at);
+            el('ev-cta-text').value = e.cta_text || '';
+            el('ev-cta-url').value = e.cta_url || '';
             renderEventGamePicks(e.games);
             el('ev-name').focus();
         });
@@ -736,6 +741,8 @@
                         starts_at: asUtc(el('ev-start').value),
                         ends_at: asUtc(el('ev-end').value),
                         games: picked,
+                        cta_text: el('ev-cta-text').value.trim(),
+                        cta_url: el('ev-cta-url').value.trim(),
                     }),
                 });
                 if (!res.ok) throw new Error(describe(await res.json().catch(() => ({}))));

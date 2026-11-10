@@ -18,6 +18,9 @@ several events can run on the same dates. You never need a developer or a deploy
    - **opens / closes** (optional, UTC): plays outside the window still save, but are not
      put on the event's board. Leave blank for always open.
    - **games**: tick every game being played there (at least one).
+   - **CTA button text / CTA link** (optional): after a player claims a score at this event,
+     the claim page shows this button instead of "Learn More About Inkless". Set both or
+     neither; leave them blank for the Inkless default.
 3. Click **Save event**. The event gets one row per game, each with everything you need:
 
    | You want | Use |

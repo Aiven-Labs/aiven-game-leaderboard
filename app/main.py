@@ -529,6 +529,24 @@ async def claim_page(session_id: str, request: Request):
         highscore_line = html.escape(_hs.replace('{score}', str(score_display))) \
             .replace('\\', '\\\\').replace('`', '\\`').replace('${', '\\${')
         total_savings_formatted = score_display  # kept: used below by older fragments
+
+        # Post-claim CTA: the score's event can set its own, otherwise the Inkless one
+        cta_text, cta_url = "Learn More About Inkless →", "https://aiven.io/inkless"
+        if row.get('event'):
+            try:
+                event_cta = await database.get_event_cta(row['event'])
+                if event_cta:
+                    cta_text, cta_url = event_cta
+            except Exception as e:
+                logger.warning(f"Could not load CTA for event {row['event']}: {e}")
+        claim_cta = (
+            '<div class="thank-you" id="claimCta" hidden>'
+            '<h2>✨ Thank you for playing!</h2>'
+            "<p>You've been added to our Inkless updates list. We'll keep you informed "
+            'about new features and product releases.</p>'
+            f'<a href="{html.escape(cta_url)}" target="_blank" rel="noopener noreferrer">{html.escape(cta_text)}</a>'
+            '</div>'
+        )
         
         # If already claimed
         if row['email']:
@@ -901,9 +919,42 @@ async def claim_page(session_id: str, request: Request):
                     </div>
                     
                     <div id="message"></div>
+                    {claim_cta}
                 </div>
 
                 <script>
+                // Cache the player's form entry on this device so a repeat claim
+                // (another game, same phone) comes prefilled. Consent is never cached.
+                const CLAIM_CACHE_KEY = 'aiven-game-claim-form';
+                const CACHED_FIELDS = ['email', 'nickname', 'company', 'title'];
+
+                function loadClaimCache() {{
+                    try {{
+                        const cached = JSON.parse(localStorage.getItem(CLAIM_CACHE_KEY) || '{{}}');
+                        CACHED_FIELDS.forEach((id) => {{
+                            const input = document.getElementById(id);
+                            if (input && typeof cached[id] === 'string' && !input.value) input.value = cached[id];
+                        }});
+                    }} catch (err) {{ /* storage unavailable or corrupt - ignore */ }}
+                }}
+
+                function saveClaimCache() {{
+                    try {{
+                        const entry = {{}};
+                        CACHED_FIELDS.forEach((id) => {{
+                            const input = document.getElementById(id);
+                            if (input) entry[id] = input.value;
+                        }});
+                        localStorage.setItem(CLAIM_CACHE_KEY, JSON.stringify(entry));
+                    }} catch (err) {{ /* storage unavailable - ignore */ }}
+                }}
+
+                loadClaimCache();
+                CACHED_FIELDS.forEach((id) => {{
+                    const input = document.getElementById(id);
+                    if (input) input.addEventListener('input', saveClaimCache);
+                }});
+
                 // Check if this is a high score
                 fetch('/api/check-high-score/{session_id}')
                     .then(response => response.json())
@@ -996,19 +1047,9 @@ async def claim_page(session_id: str, request: Request):
                                 message += `<div class="high-score">🎉 High Score Confirmed! You ranked #${{data.rank}}!</div>`;
                             }}
                             
-                            message += `
-                            <div class="thank-you">
-                                <h2>✨ Thank you for playing!</h2>
-                                <p>
-                                    You've been added to our Inkless updates list. We'll keep you informed 
-                                    about new features and product releases.
-                                </p>
-                                <a href="https://aiven.io/inkless" target="_blank">
-                                    Learn More About Inkless →
-                                </a>
-                            </div>`;
-                            
                             messageDiv.innerHTML = message;
+                            // Reveal the post-claim CTA (the event's own, or the Inkless default)
+                            document.getElementById('claimCta').hidden = false;
                             document.getElementById('claimSection').style.display = 'none';
                         }} else {{
                             let errorMessage = 'An error occurred';
@@ -1453,6 +1494,7 @@ async def admin_list_events(request: Request):
             "ends_at": e["ends_at"].isoformat() if e["ends_at"] else None,
             "status": _event_status(e),
             "games": e["games"],
+            "cta_text": e.get("cta_text"), "cta_url": e.get("cta_url"),
             "boards": boards,
             # Before events had games: the first board's links, for older scripts
             "links": boards[0]["links"] if boards else None,
@@ -1518,7 +1560,8 @@ async def admin_upsert_event(slug: str, event: EventUpsert):
         return dt.astimezone(timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
 
     try:
-        await database.upsert_event(slug, event.name, naive_utc(event.starts_at), naive_utc(event.ends_at), event.games)
+        await database.upsert_event(slug, event.name, naive_utc(event.starts_at), naive_utc(event.ends_at), event.games,
+                                    event.cta())
         logger.info(f"Admin saved event {slug} (games: {event.games if event.games is not None else 'unchanged'})")
         return {"success": True}
     except ValueError as e:

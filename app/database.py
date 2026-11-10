@@ -122,6 +122,12 @@ class Database:
                     ('pgconf-2026', 'PGConf 2026')
                 ON CONFLICT (slug) DO NOTHING;
             """)
+            # Optional call to action shown on the claim page after a player claims a score
+            # at this event; with none set the claim page falls back to the Inkless CTA
+            await conn.execute("""
+                ALTER TABLE events ADD COLUMN IF NOT EXISTS cta_text VARCHAR(100),
+                                   ADD COLUMN IF NOT EXISTS cta_url VARCHAR(500);
+            """)
 
             # ---- multiple games --------------------------------------------------------
             # A game says how its scores rank and display, so one leaderboard service can serve
@@ -511,7 +517,7 @@ class Database:
         """Every event, each with `games`: the slugs of the games it runs, in game order"""
         async with self.pool.acquire() as conn:
             rows = await conn.fetch("""
-                SELECT e.slug, e.name, e.starts_at, e.ends_at,
+                SELECT e.slug, e.name, e.starts_at, e.ends_at, e.cta_text, e.cta_url,
                        COALESCE(ARRAY_AGG(eg.game ORDER BY g.created_at, g.slug)
                                 FILTER (WHERE eg.game IS NOT NULL), '{}') AS games
                 FROM events e
@@ -522,11 +528,22 @@ class Database:
             """)
             return [{**dict(r), "games": list(r["games"])} for r in rows]
 
-    async def upsert_event(self, slug: str, name: str, starts_at, ends_at, games=None):
+    async def get_event_cta(self, slug: str):
+        """(cta_text, cta_url) for an event, or None when it has no CTA or doesn't exist"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT cta_text, cta_url FROM events WHERE slug = $1", slug)
+            if row and row["cta_text"] and row["cta_url"]:
+                return row["cta_text"], row["cta_url"]
+            return None
+
+    async def upsert_event(self, slug: str, name: str, starts_at, ends_at, games=None,
+                           cta=None):
         """Create an event or edit its name and window (naive UTC datetimes).
 
         games: the full list of game slugs the event runs, replacing the old list. None leaves
-        an existing event's games as they are. Unknown slugs raise a ValueError naming them."""
+        an existing event's games as they are. Unknown slugs raise a ValueError naming them.
+        cta: (text, url) for the post-claim call to action; (None, None) clears it and None
+        leaves an existing event's CTA as it is."""
         async with self.pool.acquire() as conn:
             async with conn.transaction():
                 if games is not None:
@@ -536,10 +553,13 @@ class Database:
                     if missing:
                         raise ValueError(f"unknown game(s): {', '.join(missing)}")
                 await conn.execute("""
-                    INSERT INTO events (slug, name, starts_at, ends_at) VALUES ($1, $2, $3, $4)
+                    INSERT INTO events (slug, name, starts_at, ends_at, cta_text, cta_url)
+                    VALUES ($1, $2, $3, $4, $6, $7)
                     ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name,
-                        starts_at = EXCLUDED.starts_at, ends_at = EXCLUDED.ends_at
-                """, slug, name, starts_at, ends_at)
+                        starts_at = EXCLUDED.starts_at, ends_at = EXCLUDED.ends_at,
+                        cta_text = CASE WHEN $5 THEN EXCLUDED.cta_text ELSE events.cta_text END,
+                        cta_url = CASE WHEN $5 THEN EXCLUDED.cta_url ELSE events.cta_url END
+                """, slug, name, starts_at, ends_at, cta is not None, *(cta or (None, None)))
                 if games is not None:
                     await conn.execute("DELETE FROM event_games WHERE event = $1", slug)
                     await conn.executemany(
