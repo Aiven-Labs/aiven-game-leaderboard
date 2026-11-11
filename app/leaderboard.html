@@ -4,19 +4,23 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Inkless Game Leaderboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+    <link rel="stylesheet" href="/assets/aquarium-dark.css">
     <style>
         * {
             box-sizing: border-box;
         }
         
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            font-family: var(--aq-font);
             margin: 0;
-            padding: 20px;
-            background: #000000;
-            color: #ffffff;
+            padding: var(--aq-space-6);
+            background: var(--aq-bg-body);
+            color: var(--aq-text-default);
             min-height: 100vh;
-            line-height: 1.6;
+            line-height: 1.42;
         }
         
         .container {
@@ -26,57 +30,58 @@
         
         .header {
             text-align: center;
-            margin-bottom: 40px;
+            margin-bottom: var(--aq-space-8);
         }
         
+        /* Larger than Aquarium's 26px large-heading: this board is read from across a room */
         .header h1 {
-            margin: 0;
-            font-size: 2.5em;
-            font-weight: 700;
-            color: #ffffff;
-            margin-bottom: 10px;
+            margin: 0 0 var(--aq-space-3);
+            font-size: clamp(26px, 4vw, 40px);
+            font-weight: 600;
+            letter-spacing: -0.5px;
+            color: var(--aq-text-default);
         }
         
         .header p {
-            margin: 10px 0 0 0;
-            color: #cccccc;
-            font-size: 1.2em;
+            margin: var(--aq-space-3) 0 0 0;
+            color: var(--aq-text-muted);
+            font-size: var(--aq-fs-subheading);
             font-weight: 400;
         }
         
         .leaderboard {
-            background: #111111;
-            border-radius: 12px;
+            background: var(--aq-bg-layer);
+            border-radius: var(--aq-radius-lg);
             overflow: hidden;
-            border: 1px solid #333333;
+            border: 1px solid var(--aq-border-muted);
         }
         
         .leaderboard-header {
             display: grid;
             grid-template-columns: 60px 1fr 150px 120px 120px 150px;
-            gap: 15px;
-            padding: 20px;
-            background: #FF6B35;
-            color: #000000;
-            font-weight: 600;
-            font-size: 0.95em;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+            gap: var(--aq-space-5);
+            padding: var(--aq-space-4) var(--aq-space-6);
+            background: var(--aq-bg-layer);
+            color: var(--aq-text-muted);
+            border-bottom: 1px solid var(--aq-border-default);
+            font-weight: 500;
+            font-size: var(--aq-fs-small);
         }
         
         .leaderboard-row {
             display: grid;
             grid-template-columns: 60px 1fr 150px 120px 120px 150px;
-            gap: 15px;
-            padding: 20px;
-            background: #222222;
-            border-bottom: 1px solid #333333;
-            transition: background 0.2s ease;
+            gap: var(--aq-space-5);
+            padding: var(--aq-space-5) var(--aq-space-6);
+            background: var(--aq-bg-layer);
+            border-bottom: 1px solid var(--aq-border-muted);
+            font-size: var(--aq-fs-large);
+            transition: background 0.15s ease;
             align-items: center;
         }
         
         .leaderboard-row:hover {
-            background: #2a2a2a;
+            background: var(--aq-bg-hover);
         }
         
         .leaderboard-row:last-child {
@@ -93,20 +98,20 @@
             font-size: 1.5em;
         }
         
-        .rank-1 { color: #FFD700; }
-        .rank-2 { color: #C0C0C0; }
-        .rank-3 { color: #CD7F32; }
+        .rank-1 { color: var(--aq-warning); }
+        .rank-2 { color: var(--aq-rank-2); }
+        .rank-3 { color: var(--aq-rank-3); }
         
         .nickname {
             font-weight: 600;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
-            color: #ffffff;
+            color: var(--aq-text-default);
         }
         
         .company {
-            color: #999999;
+            color: var(--aq-text-subtle);
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -115,20 +120,20 @@
         
         .savings {
             font-weight: 700;
-            color: #4CAF50;
+            color: var(--aq-success);
             text-align: right;
             font-size: 1.1em;
         }
         
         .bill {
-            color: #FF6B6B;
+            color: var(--aq-danger);
             text-align: right;
             font-weight: 500;
         }
         
         .date {
             font-size: 0.85em;
-            color: #888888;
+            color: var(--aq-text-subtle);
             text-align: right;
         }
         
@@ -136,50 +141,31 @@
             text-align: center;
             padding: 60px;
             font-size: 1.1em;
-            color: #cccccc;
+            color: var(--aq-text-muted);
         }
         
         .error {
             text-align: center;
             padding: 40px;
-            color: #FF6B6B;
-            background: #1a0000;
-            border: 1px solid #FF6B6B;
-            border-radius: 8px;
+            color: var(--aq-danger);
+            background: var(--aq-danger-surface);
+            border: 1px solid var(--aq-danger-border);
+            border-radius: var(--aq-radius-lg);
             margin: 20px;
         }
         
         .no-scores {
             text-align: center;
             padding: 60px;
-            color: #FF6B35;
+            color: var(--aq-primary-text);
             font-size: 1.2em;
             font-weight: 500;
         }
         
+        /* Aquarium secondary button; base styles come from aquarium-dark.css */
         .refresh-btn {
-            background: #FF6B35;
-            border: none;
-            color: #000000;
-            padding: 12px 24px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 0.95em;
-            font-weight: 600;
-            transition: all 0.2s ease;
-            margin: 30px auto 0;
-            display: block;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        
-        .refresh-btn:hover {
-            background: #e55a2b;
-            transform: translateY(-1px);
-        }
-        
-        .refresh-btn:active {
-            transform: translateY(0);
+            display: flex;
+            margin: var(--aq-space-7) auto 0;
         }
         
         @media (max-width: 1024px) {
@@ -230,37 +216,42 @@
             margin: 0 0 18px;
         }
         .filter-btn {
-            background: #1a1a1a;
-            color: #cccccc;
-            border: 1px solid #444444;
-            border-radius: 999px;
-            padding: 8px 18px;
-            font-size: 14px;
-            font-family: inherit;
+            background: var(--aq-bg-raised);
+            color: var(--aq-text-muted);
+            border: 1px solid var(--aq-border-default);
+            border-radius: var(--aq-radius);
+            min-height: 32px;
+            padding: var(--aq-space-2) var(--aq-space-4);
+            font-size: var(--aq-fs-default);
+            font-weight: 500;
             cursor: pointer;
+        }
+        .filter-btn:hover {
+            background: var(--aq-bg-hover);
+            border-color: var(--aq-border-intense);
         }
         .event-select {
             max-width: 100%;
-            background: #1a1a1a;
-            color: #ffffff;
-            border: 1px solid #444444;
-            border-radius: 999px;
-            padding: 8px 14px;
-            font-size: 14px;
-            font-family: inherit;
+            background: var(--aq-bg-raised);
+            color: var(--aq-text-default);
+            border: 1px solid var(--aq-border-default);
+            border-radius: var(--aq-radius);
+            min-height: 32px;
+            padding: var(--aq-space-2) var(--aq-space-4);
+            font-size: var(--aq-fs-default);
         }
+        /* Aquarium ChoiceChip, selected */
         .filter-btn.active {
-            background: #FF6B35;
-            border-color: #FF6B35;
-            color: #000000;
-            font-weight: bold;
+            background: var(--aq-primary-surface);
+            border-color: var(--aq-primary);
+            color: var(--aq-primary-text);
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🏆 Leaderboard</h1>
+            <h1>Leaderboard</h1>
             <p>Top players who saved the most on their Kafka bills!</p>
         </div>
         
@@ -296,8 +287,8 @@
             </div>
         </div>
         
-        <button class="refresh-btn" onclick="loadLeaderboard()">
-            🔄 Refresh
+        <button class="refresh-btn secondary" onclick="loadLeaderboard()">
+            Refresh
         </button>
     </div>
 
@@ -440,7 +431,7 @@
             const parts = [];
             if (names[currentEvent]) parts.push(names[currentEvent]);
             if (gameList.length > 1 && game) parts.push(game.name);
-            if (h1) h1.textContent = '\u{1F3C6} ' + (parts.length ? parts.join(' \u00B7 ') + ' ' : '') + 'Leaderboard';
+            if (h1) h1.textContent = (parts.length ? parts.join(' \u00B7 ') + ' ' : '') + 'Leaderboard';
         }
 
         function updateFilterButtons() {

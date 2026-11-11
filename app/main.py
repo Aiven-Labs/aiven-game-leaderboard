@@ -211,6 +211,57 @@ async def root():
     }
 
 
+AQUARIUM_CSS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aquarium-dark.css")
+
+# Shared <head> tags for every page: Inter (Aquarium's typeface) and the dark Aquarium tokens.
+# Absolute path so it also resolves inside the inkless.dev leaderboard iframe.
+AQUARIUM_HEAD = (
+    '<link rel="preconnect" href="https://fonts.googleapis.com">'
+    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+    '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">'
+    '<link rel="stylesheet" href="/assets/aquarium-dark.css">'
+)
+
+
+@app.get("/assets/aquarium-dark.css", include_in_schema=False)
+async def aquarium_css():
+    """Aiven Aquarium design tokens and base styles (dark), shared by every page"""
+    return FileResponse(AQUARIUM_CSS_PATH, media_type="text/css",
+                        headers={"Cache-Control": "public, max-age=300"})
+
+
+def _simple_page(title: str, body: str, status_code: int = 200) -> HTMLResponse:
+    """A small centred Aquarium card page (not found, already claimed). `body` must be safe HTML."""
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{html.escape(title)}</title>
+    {AQUARIUM_HEAD}
+    <style>
+        body {{ padding: var(--aq-space-6) var(--aq-space-5); }}
+        .aq-card {{ max-width: 560px; margin: var(--aq-space-8) auto; text-align: center; }}
+        .aq-card h1 {{ margin: 0 0 var(--aq-space-5); }}
+        .score {{ background: var(--aq-bg-raised); border-radius: var(--aq-radius); padding: var(--aq-space-5);
+                  margin: var(--aq-space-5) 0; font-size: var(--aq-fs-large); }}
+        .score strong {{ color: var(--aq-text-muted); font-weight: 500; }}
+        .claimed {{ margin: var(--aq-space-5) 0; }}
+        .claimed strong {{ color: var(--aq-success); }}
+        .meta {{ color: var(--aq-text-subtle); font-size: var(--aq-fs-small); }}
+        .meta p {{ margin: var(--aq-space-2) 0; }}
+        p {{ color: var(--aq-text-muted); }}
+    </style>
+</head>
+<body>
+    <div class="aq-card">
+        <h1>{html.escape(title)}</h1>
+        {body}
+    </div>
+</body>
+</html>""", status_code=status_code)
+
+
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
     """Serve the game's favicon at the site root"""
@@ -312,204 +363,12 @@ async def claim_page(session_id: str, request: Request):
         row = await database.get_score(session_id)
         
         if not row:
-            return HTMLResponse("""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Score Not Found</title>
-                    <meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-    * {
-        box-sizing: border-box;
-    }
-    
-    body { 
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; 
-        max-width: 600px; 
-        margin: 50px auto; 
-        padding: 20px; 
-        background: #000000; 
-        color: #ffffff;
-        line-height: 1.6;
-    }
-    
-    .container { 
-        background: #111111; 
-        padding: 40px; 
-        border-radius: 12px; 
-        text-align: center; 
-        border: 1px solid #333333;
-    }
-    
-    h1 {
-        color: #ffffff;
-        font-weight: 700;
-        margin-bottom: 20px;
-        font-size: 2em;
-    }
-    
-    .score { 
-        font-size: 1.3em; 
-        margin: 30px 0; 
-        background: #222222; 
-        padding: 25px; 
-        border-radius: 8px; 
-        border: 1px solid #333333;
-        color: #ffffff;
-        font-weight: 600;
-    }
-    
-    .form { 
-        margin: 30px 0; 
-    }
-    
-    input[type="email"], input[type="text"] { 
-        padding: 15px; 
-        font-size: 16px; 
-        width: 300px; 
-        max-width: 100%; 
-        border: 2px solid #333333; 
-        border-radius: 6px; 
-        margin: 8px 0; 
-        background: #222222; 
-        color: #ffffff;
-        transition: border-color 0.2s ease;
-    }
-    
-    input[type="email"]:focus, input[type="text"]:focus {
-        outline: none;
-        border-color: #FF6B35;
-    }
-    
-    input::placeholder {
-        color: #888888;
-    }
-    
-    button { 
-        padding: 15px 30px; 
-        font-size: 16px; 
-        background: #FF6B35; 
-        color: #000000; 
-        border: none; 
-        border-radius: 6px; 
-        cursor: pointer; 
-        margin-top: 20px; 
-        transition: all 0.2s ease; 
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
-    
-    button:hover { 
-        background: #e55a2b; 
-        transform: translateY(-1px);
-    }
-    
-    button:active {
-        transform: translateY(0);
-    }
-    
-    button:disabled { 
-        background: #666666; 
-        cursor: not-allowed; 
-        transform: none;
-    }
-    
-    .message { 
-        margin: 20px 0; 
-        padding: 20px; 
-        border-radius: 8px; 
-    }
-    
-    .success { 
-        background: #0f2e0f; 
-        color: #4CAF50; 
-        border: 1px solid #4CAF50; 
-    }
-    
-    .error { 
-        background: #2e0f0f; 
-        color: #FF6B6B; 
-        border: 1px solid #FF6B6B; 
-    }
-    
-    .high-score { 
-        background: #2e2200; 
-        color: #FFD700; 
-        border: 1px solid #FFD700; 
-        padding: 20px; 
-        margin: 25px 0; 
-        border-radius: 8px; 
-        animation: pulse 2s infinite; 
-        font-weight: 600;
-    }
-    
-    .claimed { 
-        color: #4CAF50; 
-        font-weight: 600; 
-        margin: 25px 0; 
-    }
-    
-    .meta { 
-        color: #888888; 
-        font-size: 14px; 
-        margin: 15px 0; 
-    }
-    
-    .optional { 
-        color: #888888; 
-        font-size: 12px; 
-    }
-    
-    .loading { 
-        display: none; 
-    }
-    
-    a {
-        color: #FF6B35;
-        text-decoration: none;
-        font-weight: 500;
-    }
-    
-    a:hover {
-        text-decoration: underline;
-    }
-    
-    @keyframes pulse { 
-        0% { opacity: 1; } 
-        50% { opacity: 0.7; } 
-        100% { opacity: 1; } 
-    }
-    
-    @media (max-width: 768px) {
-        body {
-            margin: 20px auto;
-            padding: 15px;
-        }
-        
-        .container {
-            padding: 25px;
-        }
-        
-        input[type="email"], input[type="text"] {
-            width: 100%;
-        }
-        
-        h1 {
-            font-size: 1.6em;
-        }
-    }
-</style>
-                </head>
-                <body>
-                    <div class="container">
-                        <h1>🚫 Score Not Found</h1>
-                        <p>The score you're looking for doesn't exist or has been removed.</p>
-                        <p><a href="/">← Back to API</a></p>
-                    </div>
-                </body>
-                </html>
-            """, status_code=404)
+            return _simple_page(
+                "Score not found",
+                "<p>The score you're looking for doesn't exist or has been removed.</p>"
+                '<p><a href="/leaderboard">View the leaderboard</a></p>',
+                status_code=404,
+            )
         
         game_cfg = await database.get_game(row['game'])
         score_display, secondary_display = _displays(dict(row), game_cfg)
@@ -541,7 +400,7 @@ async def claim_page(session_id: str, request: Request):
                 logger.warning(f"Could not load CTA for event {row['event']}: {e}")
         claim_cta = (
             '<div class="thank-you" id="claimCta" hidden>'
-            '<h2>✨ Thank you for playing!</h2>'
+            '<h2>Thank you for playing!</h2>'
             "<p>You've been added to our Inkless updates list. We'll keep you informed "
             'about new features and product releases.</p>'
             f'<a href="{html.escape(cta_url)}" target="_blank" rel="noopener noreferrer">{html.escape(cta_text)}</a>'
@@ -550,36 +409,14 @@ async def claim_page(session_id: str, request: Request):
         
         # If already claimed
         if row['email']:
-            company_display = f"<br><strong>Company:</strong> {row.get('company', 'Not specified')}" if row.get('company') else ""
-            return HTMLResponse(f"""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Score Already Claimed</title>
-                    <meta name="viewport" content="width=device-width, initial-scale=1">
-                    <style>
-                        body {{ font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; background: #f8f9fa; }}
-                        .container {{ background: white; padding: 30px; border-radius: 10px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-                        .score {{ font-size: 24px; margin: 20px 0; background: #e9ecef; padding: 15px; border-radius: 5px; }}
-                        .claimed {{ color: #28a745; font-weight: bold; margin: 20px 0; }}
-                        .meta {{ color: #6c757d; font-size: 14px; }}
-                    </style>
-                </head>
-                <body>
-                    <div class="container">
-                        <h1>🎉 Score Already Claimed!</h1>
-                        <div class="score">
-                            {score_block}
-                        </div>
-                        <div class="claimed">This score was claimed by:<br><strong>"{row['nickname'] or 'Anonymous'}"</strong>{company_display}</div>
-                        <div class="meta">
-                            <p>Claimed on: {row['claimed_at'].strftime('%B %d, %Y at %I:%M %p')}</p>
-                            <p>Game played on: {row['timestamp'].strftime('%B %d, %Y at %I:%M %p')}</p>
-                        </div>
-                    </div>
-                </body>
-                </html>
-            """)
+            company_display = (f"<br>{html.escape(row['company'])}" if row.get('company') else "")
+            return _simple_page("Score already claimed", f"""
+                <div class="score">{score_block}</div>
+                <div class="claimed">Claimed by<br><strong>{html.escape(row['nickname'] or 'Anonymous')}</strong>{company_display}</div>
+                <div class="meta">
+                    <p>Claimed {row['claimed_at'].strftime('%B %d, %Y at %I:%M %p')}</p>
+                    <p>Played {row['timestamp'].strftime('%B %d, %Y at %I:%M %p')}</p>
+                </div>""")
         
        # Show claim form
         return HTMLResponse(f"""
@@ -588,296 +425,132 @@ async def claim_page(session_id: str, request: Request):
             <head>
                 <meta charset="UTF-8">
                 <title>Claim Your Score - Inkless Game</title>
+                {AQUARIUM_HEAD}
                 <meta name="viewport" content="width=device-width, initial-scale=1">
                 <style>
-                    * {{
-                        box-sizing: border-box;
-                    }}
-                    
+                    /* Aquarium (dark) via /assets/aquarium-dark.css; layout only here */
                     body {{
-                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-                        margin: 0;
-                        padding: 20px;
-                        background: #000000;
-                        color: #ffffff;
+                        padding: var(--aq-space-6) var(--aq-space-5);
                         min-height: 100vh;
-                        line-height: 1.6;
                     }}
-                    
-                    .container {{
-                        max-width: 600px;
-                        margin: 0 auto;
-                    }}
-                    
+                    .container {{ max-width: 560px; margin: 0 auto; }}
                     h1 {{
                         text-align: center;
-                        font-size: 2.5em;
-                        font-weight: 700;
-                        color: #ffffff;
-                        margin: 0 0 30px 0;
+                        margin: var(--aq-space-5) 0 var(--aq-space-6);
                     }}
-                    
-                    .score {{
-                        background: #111111;
-                        border: 1px solid #333333;
-                        border-radius: 12px;
-                        padding: 30px;
-                        margin-bottom: 20px;
-                        text-align: center;
-                        font-size: 1.3em;
+                    .score, .form, .thank-you {{
+                        background: var(--aq-bg-layer);
+                        border: 1px solid var(--aq-border-muted);
+                        border-radius: var(--aq-radius-lg);
+                        padding: var(--aq-space-6);
+                        margin-bottom: var(--aq-space-5);
                     }}
-                    
+                    .score {{ text-align: center; font-size: var(--aq-fs-large); }}
                     .score strong {{
-                        color: #FF6B35;
+                        color: var(--aq-text-muted);
+                        font-weight: 500;
                         display: inline-block;
-                        min-width: 140px;
+                        min-width: 120px;
                     }}
-                    
-                    .savings-value {{
-                        color: #4CAF50;
-                        font-weight: 700;
-                        font-size: 1.2em;
-                    }}
-                    
-                    .bill-value {{
-                        color: #FF6B6B;
-                        font-weight: 700;
-                    }}
-                    
+                    .savings-value {{ color: var(--aq-success); font-weight: 600; font-size: var(--aq-fs-heading); }}
+                    .bill-value {{ color: var(--aq-danger); font-weight: 600; }}
                     .meta {{
                         text-align: center;
-                        color: #888888;
-                        font-size: 0.9em;
-                        margin-bottom: 20px;
+                        color: var(--aq-text-subtle);
+                        font-size: var(--aq-fs-small);
+                        margin-bottom: var(--aq-space-5);
                     }}
-                    
+                    /* Aquarium Banner, warning tint: the high-score callout */
                     .high-score {{
-                        background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
-                        color: #000000;
-                        padding: 20px;
-                        border-radius: 12px;
+                        background: var(--aq-warning-surface);
+                        border: 1px solid var(--aq-warning-border);
+                        border-radius: var(--aq-radius);
+                        color: var(--aq-warning);
+                        padding: var(--aq-space-5);
+                        margin: 0 0 var(--aq-space-5);
                         text-align: center;
-                        margin: 20px 0;
-                        font-weight: 700;
-                        font-size: 1.2em;
-                        border: 2px solid #FFD700;
-                        animation: pulse 2s infinite;
+                        font-size: var(--aq-fs-large);
+                        font-weight: 600;
                     }}
-                    
-                    @keyframes pulse {{
-                        0%, 100% {{ transform: scale(1); }}
-                        50% {{ transform: scale(1.02); }}
-                    }}
-                    
-                    .form {{
-                        background: #111111;
-                        border: 1px solid #333333;
-                        border-radius: 12px;
-                        padding: 30px;
-                        margin: 20px 0;
-                    }}
-                    
                     .form p {{
+                        margin: 0 0 var(--aq-space-5);
+                        font-size: var(--aq-fs-subheading);
                         text-align: center;
-                        font-size: 1.1em;
-                        margin: 0 0 25px 0;
-                        color: #FF6B35;
                     }}
-                    
-                    .form input {{
+                    .form input[type="email"], .form input[type="text"] {{
                         width: 100%;
-                        padding: 14px;
-                        margin: 10px 0;
-                        background: #222222;
-                        border: 1px solid #444444;
-                        border-radius: 6px;
-                        color: #ffffff;
-                        font-size: 1em;
-                        transition: border-color 0.2s ease;
+                        min-height: 44px; /* comfortable touch target on phones */
+                        margin: var(--aq-space-3) 0 var(--aq-space-2);
+                        font-size: var(--aq-fs-large); /* 16px stops iOS zooming on focus */
                     }}
-                    
-                    .form input:focus {{
-                        outline: none;
-                        border-color: #FF6B35;
-                    }}
-                    
-                    .form input::placeholder {{
-                        color: #666666;
-                    }}
-                    
                     .form small {{
                         display: block;
-                        color: #888888;
-                        font-size: 0.85em;
-                        margin: -5px 0 10px 5px;
+                        color: var(--aq-text-subtle);
+                        font-size: var(--aq-fs-small);
+                        margin: 0 0 var(--aq-space-3);
                     }}
-                    
-                    .form small.optional {{
-                        color: #666666;
+                    .form small.optional {{ color: var(--aq-text-inactive); }}
+                    .consent-text {{
+                        background: var(--aq-bg-raised);
+                        border: 1px solid var(--aq-border-muted);
+                        border-radius: var(--aq-radius);
+                        padding: var(--aq-space-4) var(--aq-space-5);
+                        margin: var(--aq-space-5) 0;
+                        color: var(--aq-text-muted);
                     }}
-                    
                     .consent-label {{
                         display: flex;
                         align-items: flex-start;
-                        gap: 12px;
+                        gap: var(--aq-space-4);
                         cursor: pointer;
                     }}
-
                     .consent-label input[type="checkbox"] {{
-                        width: 22px;
-                        height: 22px;
-                        min-width: 22px;
-                        margin: 2px 0 0 0;
-                        padding: 0;
-                        accent-color: #FF6B35;
-                        cursor: pointer;
+                        width: 20px;
+                        height: 20px;
+                        min-width: 20px;
+                        margin: 0;
                     }}
-
-                    .consent-label a {{
-                        color: #FF6B35;
-                        word-break: break-all;
-                    }}
-
-                    .consent-text {{
-                        background: #1a1a1a;
-                        border-left: 3px solid #FF6B35;
-                        padding: 15px;
-                        margin: 20px 0;
-                        font-size: 0.95em;
-                        color: #cccccc;
-                        line-height: 1.6;
-                        border-radius: 4px;
-                    }}
-                    
-                    button {{
-                        width: 100%;
-                        padding: 16px;
-                        background: #FF6B35;
-                        border: none;
-                        border-radius: 6px;
-                        color: #000000;
-                        font-size: 1.1em;
-                        font-weight: 600;
-                        cursor: pointer;
-                        transition: all 0.2s ease;
-                        text-transform: uppercase;
-                        letter-spacing: 0.5px;
-                        margin-top: 10px;
-                    }}
-                    
-                    button:hover {{
-                        background: #e55a2b;
-                        transform: translateY(-1px);
-                    }}
-                    
-                    button:active {{
-                        transform: translateY(0);
-                    }}
-                    
-                    button:disabled {{
-                        background: #444444;
-                        cursor: not-allowed;
-                        transform: none;
-                    }}
-                    
-                    .loading {{
-                        display: none;
-                    }}
-                    
-                    .success {{
-                        background: #1a4d2e;
-                        border: 1px solid #4CAF50;
-                        color: #4CAF50;
-                        padding: 20px;
-                        border-radius: 12px;
+                    .consent-label a {{ word-break: break-all; }}
+                    /* Aquarium primary button, full width on the form */
+                    .form button {{ width: 100%; min-height: 44px; font-size: var(--aq-fs-large); }}
+                    .loading {{ display: none; }}
+                    /* Aquarium Alert: success / danger */
+                    .success, .error {{
+                        border: 1px solid;
+                        border-radius: var(--aq-radius);
+                        padding: var(--aq-space-4) var(--aq-space-5);
+                        margin: 0 0 var(--aq-space-5);
                         text-align: center;
-                        margin: 20px 0;
-                        font-size: 1.2em;
-                        font-weight: 600;
+                        font-weight: 500;
                     }}
-                    
-                    .error {{
-                        background: #1a0000;
-                        border: 1px solid #FF6B6B;
-                        color: #FF6B6B;
-                        padding: 20px;
-                        border-radius: 12px;
-                        text-align: center;
-                        margin: 20px 0;
-                        font-weight: 600;
-                    }}
-                    
-                    .thank-you {{
-                        background: #111111;
-                        border: 1px solid #333333;
-                        border-radius: 12px;
-                        padding: 30px;
-                        margin-top: 20px;
-                        border-left: 4px solid #FF6B35;
-                    }}
-                    
-                    .thank-you h2 {{
-                        margin: 0 0 15px 0;
-                        font-size: 1.4em;
-                        color: #FF6B35;
-                    }}
-                    
-                    .thank-you p {{
-                        color: #cccccc;
-                        margin: 10px 0;
-                        line-height: 1.6;
-                    }}
-                    
+                    .success {{ background: var(--aq-success-surface); border-color: var(--aq-success-border); color: var(--aq-success); }}
+                    .error {{ background: var(--aq-danger-surface); border-color: var(--aq-danger-border); color: var(--aq-danger); }}
+                    .thank-you h2 {{ margin: 0 0 var(--aq-space-4); }}
+                    .thank-you p {{ color: var(--aq-text-muted); margin: 0 0 var(--aq-space-5); }}
+                    /* The CTA link, styled as an Aquarium primary button */
                     .thank-you a {{
-                        display: inline-block;
-                        background: #FF6B35;
-                        color: #000000;
-                        padding: 14px 28px;
+                        display: inline-flex;
+                        align-items: center;
+                        min-height: 40px;
+                        padding: var(--aq-space-3) var(--aq-space-5);
+                        background: var(--aq-btn-primary-bg);
+                        color: var(--aq-btn-primary-text);
+                        border-radius: var(--aq-radius);
+                        font-weight: 500;
                         text-decoration: none;
-                        border-radius: 6px;
-                        font-weight: 600;
-                        margin-top: 15px;
-                        transition: all 0.2s ease;
-                        text-transform: uppercase;
-                        letter-spacing: 0.5px;
-                        font-size: 0.95em;
                     }}
-                    
-                    .thank-you a:hover {{
-                        background: #e55a2b;
-                        transform: translateY(-1px);
-                    }}
-                    
+                    .thank-you a:hover {{ background: var(--aq-btn-primary-hover); }}
                     .privacy-note {{
                         text-align: center;
-                        color: #666666;
-                        font-size: 0.85em;
-                        margin-top: 15px;
-                    }}
-                    
-                    @media (max-width: 768px) {{
-                        body {{
-                            padding: 15px;
-                        }}
-                        
-                        h1 {{
-                            font-size: 2em;
-                        }}
-                        
-                        .score {{
-                            font-size: 1.1em;
-                            padding: 20px;
-                        }}
-                        
-                        .form {{
-                            padding: 20px;
-                        }}
+                        color: var(--aq-text-inactive);
+                        font-size: var(--aq-fs-small);
+                        margin-top: var(--aq-space-5);
                     }}
                 </style>
             </head>
             <body>
                 <div class="container">
-                    <h1>🎮 Claim Your Score!</h1>
+                    <h1>Claim your score</h1>
                     
                     <div class="score">
                         {score_block_form}
@@ -908,13 +581,13 @@ async def claim_page(session_id: str, request: Request):
                             </div>
 
                             <button type="submit" id="submitBtn">
-                                <span class="loading">⏳ Claiming...</span>
-                                <span class="normal">Claim Score</span>
+                                <span class="loading">Claiming…</span>
+                                <span class="normal">Claim score</span>
                             </button>
                         </form>
                         
                         <div class="privacy-note">
-                            📧 Your email is used for score verification and product updates.
+                            Your email is used for score verification and product updates.
                         </div>
                     </div>
                     
@@ -961,7 +634,7 @@ async def claim_page(session_id: str, request: Request):
                     .then(data => {{
                         if (data.is_high_score) {{
                             document.getElementById('highScoreCheck').innerHTML = 
-                                `<div class="high-score">🏆 HIGH SCORE! {highscore_line}<br>
+                                `<div class="high-score">High score! {highscore_line}<br>
                                 Rank #${{data.rank}} out of ${{data.total_scores}} players!</div>`;
                         }}
                     }})
@@ -970,7 +643,7 @@ async def claim_page(session_id: str, request: Request):
                 document.getElementById('claimForm').addEventListener('submit', async (e) => {{
                     e.preventDefault();
                     if (!document.getElementById('privacyConsent').checked) {{
-                        document.getElementById('message').innerHTML = '<div class="error">❌ Please agree to the privacy policy to continue.</div>';
+                        document.getElementById('message').innerHTML = '<div class="error">Please agree to the privacy policy to continue.</div>';
                         return;
                     }}
                     const email = document.getElementById('email').value;
@@ -1042,9 +715,9 @@ async def claim_page(session_id: str, request: Request):
                             }}, 2000);
                             
                             // Show success message
-                            let message = '<div class="success">✅ Score claimed successfully!</div>';
+                            let message = '<div class="success">Score claimed</div>';
                             if (data.is_high_score) {{
-                                message += `<div class="high-score">🎉 High Score Confirmed! You ranked #${{data.rank}}!</div>`;
+                                message += `<div class="high-score">High score confirmed. You ranked #${{data.rank}}!</div>`;
                             }}
                             
                             messageDiv.innerHTML = message;
@@ -1068,14 +741,14 @@ async def claim_page(session_id: str, request: Request):
                                 }}
                             }}
                             
-                            messageDiv.innerHTML = '<div class="error">❌ ' + errorMessage + '</div>';
+                            messageDiv.innerHTML = '<div class="error">' + errorMessage + '</div>';
                             submitBtn.disabled = false;
                             submitBtn.querySelector('.loading').style.display = 'none';
                             submitBtn.querySelector('.normal').style.display = 'inline';
                         }}
                     }} catch (err) {{
                         console.error('Error:', err);
-                        messageDiv.innerHTML = '<div class="error">❌ Error claiming score. Please try again.</div>';
+                        messageDiv.innerHTML = '<div class="error">Could not claim your score. Please try again.</div>';
                         submitBtn.disabled = false;
                         submitBtn.querySelector('.loading').style.display = 'none';
                         submitBtn.querySelector('.normal').style.display = 'inline';
@@ -1965,10 +1638,15 @@ async def guide_page():
         body = f"<pre>{html.escape(text)}</pre>"
     return HTMLResponse(f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>Add a leaderboard to your game</title>
+{AQUARIUM_HEAD}
 <style>
-body{{background:#000;color:#e8e8e8;font:16px/1.6 -apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;padding:24px}}
-main{{max-width:820px;margin:0 auto}} h1,h2,h3{{color:#fff}} h1{{border-bottom:1px solid #333;padding-bottom:10px}}
-a{{color:#FF6B35}} code{{background:#1a1a1a;padding:2px 6px;border-radius:4px;font-size:.92em}}
-pre{{background:#111;border:1px solid #2a2a2a;border-radius:8px;padding:14px;overflow-x:auto}} pre code{{background:none;padding:0}}
-table{{border-collapse:collapse;width:100%}} th,td{{border:1px solid #333;padding:8px 10px;text-align:left}} th{{background:#1a1a1a}}
+body{{font-size:var(--aq-fs-large);line-height:1.5;padding:var(--aq-space-6) var(--aq-space-5)}}
+main{{max-width:820px;margin:0 auto}}
+h1{{border-bottom:1px solid var(--aq-border-muted);padding-bottom:var(--aq-space-4)}}
+h2{{margin-top:var(--aq-space-7)}}
+code{{background:var(--aq-bg-raised);padding:var(--aq-space-1) var(--aq-space-2);border-radius:var(--aq-radius);font-size:var(--aq-fs-default)}}
+pre{{background:var(--aq-bg-layer);border:1px solid var(--aq-border-muted);border-radius:var(--aq-radius-lg);padding:var(--aq-space-5);overflow-x:auto}}
+pre code{{background:none;padding:0}}
+th,td{{border:1px solid var(--aq-border-muted);padding:var(--aq-space-3) var(--aq-space-4);text-align:left}}
+td{{border-bottom:1px solid var(--aq-border-muted)}}
 </style></head><body><main>{body}</main></body></html>""")

@@ -1,0 +1,244 @@
+/*
+ * Aquarium (Aiven's design system), dark.
+ *
+ * Aquarium only ships a light theme, so this maps its own palette onto dark surfaces:
+ * the grey scale is flipped (grey-100 body -> grey-5 text), primary teal and the status
+ * scales use their lighter steps for text and their darkest steps for tinted surfaces.
+ * Type, spacing, radius and elevation are Aquarium's values unchanged.
+ * Source: @aivenio/aquarium 8.0.1 dist/tokens.json
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* ---- surfaces (grey-100 .. grey-70) ---- */
+  --aq-bg-body: #0d0e10;      /* grey-100 */
+  --aq-bg-layer: #16171a;     /* grey-90: cards, tables, panels */
+  --aq-bg-raised: #1f2021;    /* grey-80: inputs, rows, inverse surface */
+  --aq-bg-hover: #2d2e30;     /* grey-70 */
+
+  /* ---- borders ---- */
+  --aq-border-muted: #2d2e30;   /* grey-70 */
+  --aq-border-default: #444547; /* grey-60 */
+  --aq-border-intense: #919294; /* grey-40 */
+
+  /* ---- text ---- */
+  --aq-text-default: #f4f4f4;  /* grey-5 */
+  --aq-text-muted: #b5b5b7;    /* grey-30 */
+  --aq-text-subtle: #919294;   /* grey-40 */
+  --aq-text-inactive: #68696b; /* grey-50 */
+  --aq-text-on-light: #1f2021; /* grey-80, text on light/teal fills */
+
+  /* ---- primary (teal) ---- */
+  --aq-primary: #2ed0cd;         /* primary-30: graphic, focus, active */
+  --aq-primary-hover: #75e6e4;   /* primary-20 */
+  --aq-primary-text: #75e6e4;    /* primary-20: links on dark */
+  --aq-primary-surface: #003130; /* primary-90 */
+  --aq-focus: #2ed0cd;           /* borderColor.action.focus */
+
+  /* ---- primary button: Aquarium's is the inverse surface, so light on dark ---- */
+  --aq-btn-primary-bg: #f4f4f4;       /* grey-5 */
+  --aq-btn-primary-hover: #e1e1e1;    /* grey-20 */
+  --aq-btn-primary-active: #b5b5b7;   /* grey-30 */
+  --aq-btn-primary-text: #1f2021;     /* grey-80 */
+  --aq-btn-disabled-bg: #2d2e30;      /* grey-70 */
+  --aq-btn-disabled-text: #68696b;    /* grey-50 */
+
+  /* ---- status: text / surface / border ---- */
+  --aq-success: #3deb86;          /* success-40 */
+  --aq-success-surface: #04331a;  /* success-90 */
+  --aq-success-border: #08572d;   /* success-80 */
+  --aq-danger: #ff7d7d;           /* error-30 */
+  --aq-danger-surface: #450c0c;   /* error-100 */
+  --aq-danger-surface-hover: #661212; /* error-90 */
+  --aq-danger-border: #861919;    /* error-80 */
+  --aq-warning: #ffc21a;          /* warning-40 */
+  --aq-warning-strong: #ebac00;   /* warning-50 */
+  --aq-warning-surface: #382600;  /* warning-100 */
+  --aq-warning-border: #754f00;   /* warning-80 */
+  --aq-info: #62ace9;             /* info-30 */
+  --aq-info-surface: #00182b;     /* info-100 */
+  --aq-info-border: #032d4f;      /* info-80 */
+
+  /* ---- podium (leaderboard ranks) ---- */
+  --aq-rank-1: #ffc21a; /* warning-40 */
+  --aq-rank-2: #b5b5b7; /* grey-30 */
+  --aq-rank-3: #cc8b02; /* warning-60 */
+
+  /* ---- type ---- */
+  --aq-font: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --aq-font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --aq-fs-large-heading: 26px;
+  --aq-fs-heading: 22px;
+  --aq-fs-subheading: 18px;
+  --aq-fs-large: 16px;
+  --aq-fs-default: 14px;
+  --aq-fs-small: 12px;
+  --aq-fs-micro: 11px;
+
+  /* ---- spacing (Aquarium spacing scale) ---- */
+  --aq-space-1: 2px;
+  --aq-space-2: 4px;
+  --aq-space-3: 8px;
+  --aq-space-4: 12px;
+  --aq-space-5: 16px;
+  --aq-space-6: 24px;
+  --aq-space-7: 32px;
+  --aq-space-8: 40px;
+  --aq-space-9: 48px;
+
+  /* ---- radius / elevation ---- */
+  --aq-radius: 4px;
+  --aq-radius-lg: 6px;
+  --aq-radius-full: 9999px;
+  --aq-elevation: 0 4px 16px rgba(0, 0, 0, 0.35), 0 14px 32px rgba(0, 0, 0, 0.25);
+}
+
+/* ---- base ---- */
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--aq-bg-body);
+  color: var(--aq-text-default);
+  font-family: var(--aq-font);
+  font-size: var(--aq-fs-default);
+  line-height: 1.42;
+  letter-spacing: -0.1px;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 { color: var(--aq-text-default); font-family: var(--aq-font); }
+h1 { font-size: var(--aq-fs-large-heading); font-weight: 600; line-height: 1.35; letter-spacing: -0.5px; }
+h2 { font-size: var(--aq-fs-heading); font-weight: 600; line-height: 1.35; letter-spacing: -0.4px; }
+h3 { font-size: var(--aq-fs-subheading); font-weight: 500; line-height: 1.35; letter-spacing: -0.2px; }
+
+a { color: var(--aq-primary-text); text-decoration: none; font-weight: 500; }
+a:hover { text-decoration: underline; }
+
+code, pre, kbd { font-family: var(--aq-font-mono); }
+
+:focus-visible { outline: 2px solid var(--aq-focus); outline-offset: 2px; }
+
+::selection { background: var(--aq-primary-surface); color: var(--aq-text-default); }
+
+/* ---- form controls (Aquarium Input / Select) ---- */
+input[type="text"], input[type="email"], input[type="password"], input[type="url"],
+input[type="search"], input[type="number"], input[type="datetime-local"], select, textarea {
+  background: var(--aq-bg-raised);
+  border: 1px solid var(--aq-border-default);
+  border-radius: var(--aq-radius);
+  color: var(--aq-text-default);
+  font-family: var(--aq-font);
+  font-size: var(--aq-fs-default);
+  padding: var(--aq-space-3) var(--aq-space-4);
+  min-height: 36px;
+  transition: border-color 0.15s ease;
+}
+input:hover, select:hover, textarea:hover { border-color: var(--aq-border-intense); }
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--aq-focus);
+  box-shadow: 0 0 0 1px var(--aq-focus);
+}
+input::placeholder, textarea::placeholder { color: var(--aq-text-inactive); }
+input[type="checkbox"], input[type="radio"] { accent-color: var(--aq-primary); }
+
+/* ---- buttons (Aquarium Button: primary / secondary / ghost / danger) ---- */
+button, .aq-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--aq-space-3);
+  min-height: 36px;
+  padding: var(--aq-space-3) var(--aq-space-5);
+  background: var(--aq-btn-primary-bg);
+  color: var(--aq-btn-primary-text);
+  border: 1px solid transparent;
+  border-radius: var(--aq-radius);
+  font-family: var(--aq-font);
+  font-size: var(--aq-fs-default);
+  font-weight: 500;
+  letter-spacing: -0.15px;
+  text-transform: none;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+button:hover, .aq-btn:hover { background: var(--aq-btn-primary-hover); text-decoration: none; }
+button:active, .aq-btn:active { background: var(--aq-btn-primary-active); }
+button:disabled, .aq-btn:disabled {
+  background: var(--aq-btn-disabled-bg);
+  color: var(--aq-btn-disabled-text);
+  cursor: not-allowed;
+}
+
+button.secondary, .aq-btn.secondary {
+  background: transparent;
+  color: var(--aq-primary-text);
+  border-color: var(--aq-primary);
+}
+button.secondary:hover, .aq-btn.secondary:hover { background: var(--aq-primary-surface); }
+button.secondary:active, .aq-btn.secondary:active { border-color: var(--aq-primary-hover); }
+
+button.ghost, .aq-btn.ghost {
+  background: transparent;
+  color: var(--aq-text-default);
+}
+button.ghost:hover, .aq-btn.ghost:hover { background: var(--aq-bg-hover); }
+
+button.danger, .aq-btn.danger {
+  background: var(--aq-danger-surface);
+  color: var(--aq-danger);
+  border-color: var(--aq-danger-border);
+}
+button.danger:hover, .aq-btn.danger:hover { background: var(--aq-danger-surface-hover); }
+
+/* ---- surfaces (Aquarium Card) ---- */
+.aq-card {
+  background: var(--aq-bg-layer);
+  border: 1px solid var(--aq-border-muted);
+  border-radius: var(--aq-radius-lg);
+  padding: var(--aq-space-6);
+}
+
+/* ---- tables (Aquarium DataTable) ---- */
+table { border-collapse: collapse; width: 100%; }
+th {
+  background: var(--aq-bg-layer);
+  color: var(--aq-text-muted);
+  font-size: var(--aq-fs-small);
+  font-weight: 500;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: 0;
+  border-bottom: 1px solid var(--aq-border-default);
+}
+td { border-bottom: 1px solid var(--aq-border-muted); }
+
+/* ---- status (Aquarium Alert / Banner) ---- */
+.aq-alert {
+  border: 1px solid;
+  border-radius: var(--aq-radius);
+  padding: var(--aq-space-4) var(--aq-space-5);
+  font-size: var(--aq-fs-default);
+}
+.aq-alert.success { background: var(--aq-success-surface); border-color: var(--aq-success-border); color: var(--aq-success); }
+.aq-alert.danger  { background: var(--aq-danger-surface);  border-color: var(--aq-danger-border);  color: var(--aq-danger); }
+.aq-alert.warning { background: var(--aq-warning-surface); border-color: var(--aq-warning-border); color: var(--aq-warning); }
+.aq-alert.info    { background: var(--aq-info-surface);    border-color: var(--aq-info-border);    color: var(--aq-info); }
+
+/* ---- chips / badges (Aquarium Chip) ---- */
+.aq-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--aq-radius);
+  padding: 0 var(--aq-space-3);
+  min-height: 20px;
+  font-size: var(--aq-fs-small);
+  font-weight: 500;
+  white-space: nowrap;
+  background: var(--aq-bg-hover);
+  color: var(--aq-text-muted);
+}
+.aq-chip.success { background: var(--aq-success-surface); color: var(--aq-success); }
+.aq-chip.primary { background: var(--aq-primary-surface); color: var(--aq-primary-text); }
