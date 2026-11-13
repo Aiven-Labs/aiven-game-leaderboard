@@ -403,7 +403,7 @@ async def claim_page(session_id: str, request: Request):
         play_tpl = (game_cfg or {}).get('play_url')
         if play_tpl:
             if row.get('event'):
-                back_url = _fill_event(play_tpl, row['event']) or "/"
+                back_url = _fill_event(play_tpl, row['event']) or "/game/"
             elif '{event}' not in play_tpl:
                 back_url = play_tpl
         back_url = html.escape(back_url, quote=True)
