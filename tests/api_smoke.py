@@ -137,6 +137,8 @@ st, body, _ = call("GET", "/api/check-high-score/smoke-sr-0010", jar=False)
 check("rank respects sort order and reports the game", body["rank"] == 1 and body["game"] == "smoke-speedrun", body)
 st, _, raw = call("GET", "/claim/smoke-sr-0010", jar=False)
 check("claim page uses the game's labels", b"Time:" in raw and b"Level:" in raw and b"Total Saved" not in raw)
+check("claim page has a warned way back to the game",
+      b'id="backWithoutClaim"' in raw and b"Back to game without claiming score" in raw and b"can't win the event" in raw)
 st, body, _ = call("GET", "/api/leaderboard?limit=50", jar=False)
 check("the Disk Invaders board is unaffected by the new game",
       all(e["nickname"] not in ("Fast", "Mid", "Slow") for e in body["leaderboard"]))
