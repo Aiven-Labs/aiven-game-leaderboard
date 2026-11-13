@@ -398,6 +398,15 @@ async def claim_page(session_id: str, request: Request):
                     cta_text, cta_url = event_cta
             except Exception as e:
                 logger.warning(f"Could not load CTA for event {row['event']}: {e}")
+        # "Back to game" link: only ever the game's admin-set play_url (validated http(s)), else "/game/"
+        back_url = "/game/"
+        play_tpl = (game_cfg or {}).get('play_url')
+        if play_tpl:
+            if row.get('event'):
+                back_url = _fill_event(play_tpl, row['event']) or "/game/"
+            elif '{event}' not in play_tpl:
+                back_url = play_tpl
+        back_url = html.escape(back_url, quote=True)
         claim_cta = (
             '<div class="thank-you" id="claimCta" hidden>'
             '<h2>Thank you for playing!</h2>'
@@ -540,6 +549,18 @@ async def claim_page(session_id: str, request: Request):
                         text-decoration: none;
                     }}
                     .thank-you a:hover {{ background: var(--aq-btn-primary-hover); }}
+                    /* Warning-toned text link: leaving without claiming costs the player the event */
+                    .back-without-claim {{
+                        display: block;
+                        width: fit-content;
+                        margin: var(--aq-space-5) auto 0;
+                        padding: var(--aq-space-3) var(--aq-space-4);
+                        color: var(--aq-warning);
+                        font-size: var(--aq-fs-small);
+                        text-decoration: underline;
+                        text-underline-offset: 3px;
+                    }}
+                    .back-without-claim:hover {{ background: var(--aq-warning-surface); }}
                     .privacy-note {{
                         text-align: center;
                         color: var(--aq-text-inactive);
@@ -585,6 +606,8 @@ async def claim_page(session_id: str, request: Request):
                                 <span class="normal">Claim score</span>
                             </button>
                         </form>
+
+                        <a href="{back_url}" class="back-without-claim" id="backWithoutClaim">Back to game without claiming score</a>
                         
                         <div class="privacy-note">
                             Your email is used for score verification and product updates.
@@ -621,6 +644,13 @@ async def claim_page(session_id: str, request: Request):
                         localStorage.setItem(CLAIM_CACHE_KEY, JSON.stringify(entry));
                     }} catch (err) {{ /* storage unavailable - ignore */ }}
                 }}
+
+                // Leaving unclaimed forfeits the event, so ask first; Cancel keeps the form as is
+                document.getElementById('backWithoutClaim').addEventListener('click', (e) => {{
+                    if (!confirm("If you don't claim your score, you can't win the event. Go back to the game without claiming?")) {{
+                        e.preventDefault();
+                    }}
+                }});
 
                 loadClaimCache();
                 CACHED_FIELDS.forEach((id) => {{
