@@ -150,6 +150,27 @@
         padding: 6px 12px;
         font-size: 0.85em;
       }
+      /* Row actions read as coloured links, not buttons */
+      .actions button.link-action {
+        background: transparent;
+        border: none;
+        min-height: 0;
+        padding: 0;
+        font-size: inherit;
+        font-weight: 500;
+        color: var(--aq-primary-text);
+      }
+      .actions button.link-action:hover {
+        background: transparent;
+        text-decoration: underline;
+      }
+      .actions button.link-action:disabled {
+        background: transparent;
+        color: var(--aq-text-inactive);
+      }
+      .actions button.link-action.danger {
+        color: var(--aq-danger);
+      }
 
       .pill {
         border-radius: var(--aq-radius);
@@ -830,8 +851,8 @@
                     <td class="company">${escapeHtml(score.event) || "—"}</td>
                     <td class="date">${shortDate(score.played_at)}</td>
                     <td class="actions">
-                        <button class="secondary" data-action="edit">Edit</button>
-                        <button class="danger" data-action="delete">Delete</button>
+                        <button class="link-action" data-action="edit">Edit</button>
+                        <button class="link-action danger" data-action="delete">Delete</button>
                     </td>
                 </tr>`;
       }
@@ -1160,7 +1181,7 @@
                     <td class="qr-cell">${qr(e, b, "game", "Game")}${qr(e, b, "leaderboard", "Leaderboard")}${qr(e, b, "cabinet", "Cabinet")}</td>`
                         : '<td colspan="3" class="muted">No games yet: edit the event and tick at least one.</td>'
                     }
-                    ${i ? "" : `<td rowspan="${span}" class="actions"><button class="secondary" data-edit="${escapeHtml(e.slug)}">Edit</button></td>`}
+                    ${i ? "" : `<td rowspan="${span}" class="actions"><button class="link-action" data-edit="${escapeHtml(e.slug)}">Edit</button></td>`}
                 </tr>`,
                 )
                 .join("");
@@ -1287,7 +1308,7 @@
                     <td class="url-cell">${g.play_url ? escapeHtml(g.play_url) : '<span class="muted">no play URL</span>'}${g.cabinet_url ? '<br><span class="muted">cabinet: ' + escapeHtml(g.cabinet_url) + "</span>" : ""}</td>
                     <td class="savings">${g.score_count}</td>
                     <td><a href="/leaderboard?game=${encodeURIComponent(g.slug)}" target="_blank" rel="noopener">View</a></td>
-                    <td class="actions"><button class="secondary" data-edit-game="${escapeHtml(g.slug)}">Edit</button></td>
+                    <td class="actions"><button class="link-action" data-edit-game="${escapeHtml(g.slug)}">Edit</button></td>
                 </tr>`,
             )
             .join("") ||
@@ -1415,7 +1436,7 @@
                         <td class="date">${escapeHtml(when(t.created_at))}</td>
                         <td class="date">${escapeHtml(when(t.last_used_at))}</td>
                         <td><span class="pill ${t.revoked ? "unclaimed" : "claimed"}">${t.revoked ? "revoked" : "active"}</span></td>
-                        <td class="actions">${t.revoked ? "" : `<button class="danger" data-revoke="${t.id}" data-name="${escapeHtml(t.name)}">Revoke</button>`}</td>
+                        <td class="actions">${t.revoked ? "" : `<button class="link-action danger" data-revoke="${t.id}" data-name="${escapeHtml(t.name)}">Revoke</button>`}</td>
                     </tr>`,
               )
               .join("") ||
